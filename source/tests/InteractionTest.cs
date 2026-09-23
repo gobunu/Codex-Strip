@@ -1,0 +1,12 @@
+using System;using System.IO;using System.Reflection;using System.Threading.Tasks;using System.Windows;using System.Windows.Controls;using System.Windows.Input;using CodexStrip;
+class InteractionTest {
+ static T Field<T>(StripWindow w,string n){return (T)typeof(StripWindow).GetField(n,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(w);}
+ static void Right(UIElement element){element.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Right){RoutedEvent=UIElement.PreviewMouseRightButtonUpEvent});}
+ [STAThread] static void Main(){var app=new Application();var w=new StripWindow(true){Width=1280,Height=286};app.MainWindow=w;w.Loaded+=async delegate{try{
+ await Task.Delay(100);var card=(Button)Field<Grid>(w,"cards").Children[0];card.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice,Environment.TickCount){RoutedEvent=Mouse.MouseEnterEvent});await Task.Delay(800);if(w.PanelOpen)throw new Exception("hover opened preview");Right(card);await Task.Delay(300);if(!(Field<InsetPanel>(w,"activePanel") is PreviewPanel))throw new Exception("right click did not open");Right(Field<InsetPanel>(w,"activePanel"));await Task.Delay(300);if(w.PanelOpen)throw new Exception("preview right click did not close");
+ w.ShowUsage();await Task.Delay(300);if(Field<Grid>(w,"cards").ColumnDefinitions.Count!=7||Field<Grid>(w,"cards").RowDefinitions.Count!=0)throw new Exception("utility collapsed tasks into sidebar");w.ShowUsage();await Task.Delay(300);if(w.PanelOpen)throw new Exception("quota toggle did not close");w.ShowSettings();await Task.Delay(300);w.ShowSettings();await Task.Delay(300);if(w.PanelOpen)throw new Exception("settings toggle did not close");
+ w.ShowUsage();w.ShowSettings();await Task.Delay(300);if(!(Field<InsetPanel>(w,"activePanel") is SettingsWindow))throw new Exception("switch did not replace utility");w.ClosePanel();await Task.Delay(300);card=(Button)Field<Grid>(w,"cards").Children[0];Right(card);await Task.Delay(300);Right((Button)Field<Grid>(w,"cards").Children[0]);await Task.Delay(300);if(w.PanelOpen)throw new Exception("same task right click did not close");
+ File.WriteAllText("work/interaction-test.txt","PASS: hover inert; right click opens/closes preview; same-task right click closes; quota/settings toggle; utility cards preserve horizontal tasks; utility switching");
+ }catch(Exception e){File.WriteAllText("work/interaction-test.txt",e.ToString());}finally{w.Close();}};app.Run(w);}
+}
+

@@ -1,0 +1,6 @@
+data/
+work/
+*.log
+*-result.json
+*-test.txt
+*.tmp

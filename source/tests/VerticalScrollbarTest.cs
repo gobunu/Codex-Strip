@@ -1,0 +1,8 @@
+using System;using System.IO;using System.Reflection;using System.Threading.Tasks;using System.Windows;using System.Windows.Controls;using System.Windows.Media;using CodexStrip;
+class VerticalScrollbarTest {
+ [STAThread]static void Main(){var app=new Application();var w=new StripWindow(true){Width=1280,Height=286};app.MainWindow=w;w.Loaded+=async delegate{int frames=0,bad=0;bool watch=false;EventHandler sample=(s,e)=>{if(!watch)return;var panel=(InsetPanel)typeof(StripWindow).GetField("activePanel",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(w);if(panel==null)return;var scroll=(ScrollViewer)typeof(InsetPanel).GetField("bodyScroll",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(panel);frames++;if(scroll.ComputedVerticalScrollBarVisibility==Visibility.Visible)bad++;};CompositionTarget.Rendering+=sample;try{
+ await Task.Delay(150);watch=true;for(int i=0;i<8;i++){if(i%2==0)w.ShowUsage();else w.ShowSettings();await Task.Delay(350);w.ClosePanel();await Task.Delay(350);}watch=false;if(bad>0)throw new Exception("vertical scrollbar visible in "+bad+" frames");
+ w.ShowSettings();await Task.Delay(350);w.SetTheme("dark");await Task.Delay(100);w.Snapshot("work/stable-vertical-settings.png");w.ShowUsage();await Task.Delay(350);w.Snapshot("work/stable-vertical-quota.png");
+ File.WriteAllText("work/vertical-scrollbar-test.txt","PASS: "+frames+" rendered frames, zero vertical scrollbar frames while opening/switching utilities; theme rebuild works");
+ }catch(Exception e){File.WriteAllText("work/vertical-scrollbar-test.txt",e.ToString());}finally{CompositionTarget.Rendering-=sample;w.Close();}};app.Run(w);}
+}
