@@ -2,9 +2,11 @@
 
 Windows 上的 Codex 线程状态条，适用于横向或竖向副屏。支持任务进展、未读高亮、消息预览、额度、托盘、屏幕停靠、位置记忆和线程跳转。
 
+支持 100%–200% 可保存的界面倍率（默认 150%），以及顶部全屏按钮。按 F11 切换全屏，按 Esc 退出全屏；退出后恢复原来的浮动位置或屏幕停靠。
+
 ## 运行
 
-从 [Releases](https://github.com/gobunu/Codex-Strip/releases/latest) 下载 `CodexStrip-portable.zip` 并解压，运行 `CodexStrip.exe`。保留同目录的 `CodexStrip.exe.config`。无需安装，需要 Windows .NET Framework 4.8，且 Codex 桌面应用保持运行。
+从 [dist/CodexStrip-portable.zip](dist/CodexStrip-portable.zip) 下载便携包并解压，运行 `CodexStrip.exe`。保留同目录的 `CodexStrip.exe.config`。无需安装，需要 Windows .NET Framework 4.8，且 Codex 桌面应用保持运行。
 
 运行时个人设置保存在 `data/`，该目录不纳入版本控制。程序使用 Codex 内部桌面接口，桌面应用升级后可能需要适配。
 
