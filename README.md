@@ -4,7 +4,7 @@ Windows 上的 Codex 线程状态条，适用于横向或竖向副屏。支持�
 
 ## 运行
 
-下载本仓库 ZIP 并解压，运行根目录 `CodexStrip.exe`。保留同目录的 `CodexStrip.exe.config`。需要 Windows .NET Framework 4.8，且 Codex 桌面应用保持运行。
+从 [Releases](https://github.com/gobunu/Codex-Strip/releases/latest) 下载 `CodexStrip-portable.zip` 并解压，运行 `CodexStrip.exe`。保留同目录的 `CodexStrip.exe.config`。无需安装，需要 Windows .NET Framework 4.8，且 Codex 桌面应用保持运行。
 
 运行时个人设置保存在 `data/`，该目录不纳入版本控制。程序使用 Codex 内部桌面接口，桌面应用升级后可能需要适配。
 
