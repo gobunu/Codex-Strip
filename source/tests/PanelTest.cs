@@ -1,0 +1,12 @@
+using System;using System.IO;using System.Linq;using System.Reflection;using System.Threading.Tasks;using System.Windows;using System.Windows.Controls;using CodexStrip;
+class PanelTest {
+ static T Field<T>(StripWindow w,string name){return (T)typeof(StripWindow).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(w);}
+ static void Bounds(StripWindow w){w.UpdateLayout();var p=Field<Border>(w,"panelLayer");var at=p.TranslatePoint(new Point(),w);if(at.X<0||at.Y<0||at.X+p.ActualWidth>w.ActualWidth+1||at.Y+p.ActualHeight>w.ActualHeight+1)throw new Exception("panel outside window");if(Application.Current.Windows.Count!=1)throw new Exception("external popup window");}
+ [STAThread]static void Main(){var app=new Application();var w=new StripWindow(true);app.MainWindow=w;w.Width=1280;w.Height=286;w.Loaded+=async delegate{try{
+ await Task.Delay(150);double before=Field<ColumnDefinition>(w,"railColumn").ActualWidth;w.ShowUsage();await Task.Delay(80);double middle=Field<ColumnDefinition>(w,"railColumn").ActualWidth;await Task.Delay(300);double after=Field<ColumnDefinition>(w,"railColumn").ActualWidth;if(after>=before||SystemParameters.ClientAreaAnimation&&(middle<=after||middle>=before))throw new Exception("animation did not interpolate");Bounds(w);
+ w.ShowSettings();await Task.Delay(300);Bounds(w);w.SetTheme("dark");await Task.Delay(100);Bounds(w);w.Width=600;w.Height=210;await Task.Delay(150);Bounds(w);w.Snapshot("work/panel-test-settings.png");
+ var card=w.Engine.Cards.Values.First();card.Message=string.Join("\n",Enumerable.Repeat("## 最新进展\n**验证已完成**，下一步继续核对远端训练结果。\n- 指标完整，等待下一次更新。",12));w.ShowPreview(card);await Task.Delay(300);Bounds(w);w.Snapshot("work/panel-test-preview.png");var active=Field<InsetPanel>(w,"activePanel");var scroll=(ScrollViewer)typeof(InsetPanel).GetField("bodyScroll",BindingFlags.NonPublic|BindingFlags.Instance).GetValue(active);if(scroll.ScrollableHeight<=0)throw new Exception("long preview not scrollable");scroll.ScrollToEnd();await Task.Delay(100);if(scroll.VerticalOffset<=0)throw new Exception("preview cannot scroll");
+ w.ClosePanel();await Task.Delay(300);if(w.PanelOpen||Field<Border>(w,"panelLayer").Visibility!=Visibility.Collapsed)throw new Exception("close did not restore cards");
+ File.WriteAllText("work/panel-test.txt","PASS: animated width interpolation; usage/settings/preview stay inside; one native window; resize/theme; long preview scrolling; close restores cards");
+ }catch(Exception e){File.WriteAllText("work/panel-test.txt",e.ToString());}finally{w.Close();}};app.Run(w);}
+}

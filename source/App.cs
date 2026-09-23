@@ -1,0 +1,39 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using System.Windows.Shell;
+using System.Windows.Markup;
+
+namespace CodexStrip {
+ public static class Program {
+  [STAThread] public static int Main(string[] args){
+   if(args.Contains("--self-test"))return SelfTest();
+   if(args.Contains("--engine-test")){var engine=new MonitorEngine(Settings.Load());engine.Refresh().GetAwaiter().GetResult();engine.Refresh().GetAwaiter().GetResult();engine.RefreshUsage().GetAwaiter().GetResult();File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"engine-result.json"),J.Json(J.Obj("connected",engine.Connected,"cards",Card.Sort(engine.Cards.Values,engine.Settings).Select(c=>J.Obj("title",c.Title,"host",c.Host,"status",c.Status,"stale",c.Stale,"hasProgress",c.Message.Length>0,"messageUnavailable",c.MessageUnavailable,"questionPending",c.QuestionPending)).ToArray(),"weeklyRemaining",engine.Usage.WeeklyRemaining)));return engine.Connected?0:1;}
+   if(args.Contains("--probe")){try{Probe(args).GetAwaiter().GetResult();return 0;}catch(Exception e){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"probe-result.json"),J.Json(J.Obj("ok",false,"error",e.Message)));return 1;}}
+   var app=new Application{ShutdownMode=ShutdownMode.OnMainWindowClose};app.DispatcherUnhandledException+=(o,e)=>{e.Handled=true;try{Directory.CreateDirectory(Settings.DataDir);File.AppendAllText(Path.Combine(Settings.DataDir,"error.log"),DateTime.Now+" "+e.Exception.GetType().Name+": "+e.Exception.Message+Environment.NewLine);}catch{}};
+   var w=new StripWindow(args.Contains("--demo")||args.Contains("--tray-test"));app.MainWindow=w;TrayHost tray=null;if((!args.Contains("--demo")&&!args.Contains("--snapshot"))||args.Contains("--tray-test")){tray=new TrayHost(w);w.ApplyTheme();}app.SessionEnding+=(sender,e)=>{w.Exiting=true;}; int theme=Array.IndexOf(args,"--theme");if(theme>=0&&theme+1<args.Length)w.SetTheme(args[theme+1]);int width=Array.IndexOf(args,"--width");if(width>=0&&width+1<args.Length)w.Width=double.Parse(args[width+1]);
+   int height=Array.IndexOf(args,"--height");if(height>=0&&height+1<args.Length)w.Height=double.Parse(args[height+1]);int snap=Array.IndexOf(args,"--snapshot");if(snap>=0&&snap+1<args.Length){w.Loaded+=delegate{var t=new DispatcherTimer{Interval=TimeSpan.FromSeconds(args.Contains("--demo")?2:18)};t.Tick+=delegate{t.Stop();w.Snapshot(args[snap+1]);int preview=Array.IndexOf(args,"--preview-snapshot");if(preview>=0&&preview+1<args.Length)w.SnapshotPreview(args[preview+1]);int q=Array.IndexOf(args,"--usage-snapshot");if(q>=0&&q+1<args.Length)w.SnapshotUsage(args[q+1]);int setting=Array.IndexOf(args,"--settings-snapshot");if(setting>=0&&setting+1<args.Length)w.SnapshotSettings(args[setting+1]);w.Close();};t.Start();};}
+   if(args.Contains("--tray-test")){w.Loaded+=delegate{var timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(300)};timer.Tick+=delegate{timer.Stop();try{if(w.ShowInTaskbar||!tray.Visible)throw new Exception("tray startup");w.Close();if(w.IsVisible||!tray.Visible||w.Exiting)throw new Exception("close should hide");tray.Show();if(!w.IsVisible||w.ShowInTaskbar)throw new Exception("restore");w.ShowSettings();foreach(Window child in w.OwnedWindows)if(child.ShowInTaskbar)throw new Exception("popup taskbar");tray.Toggle();if(w.IsVisible||w.OwnedWindows.Count!=0)throw new Exception("hide children");tray.Show();tray.Exit();if(tray.Visible)throw new Exception("icon cleanup");File.WriteAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"tray-test.txt"),"PASS: no taskbar, close-to-tray, restore, popup visibility, hide children, exit cleanup");}catch(Exception e){File.WriteAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"tray-test.txt"),e.ToString());tray.Exit();}};timer.Start();};}
+   try{app.Run(w);}finally{if(tray!=null)tray.Dispose();}return 0;
+  }
+  static async Task Probe(string[] args){var b=new Bridge();await b.Discover();var list=await b.Call("list_threads",J.Obj("limit",8));var threads=J.Arr(J.Get(list,"threads"));var target=threads.FirstOrDefault(t=>J.Str(t,"hostId").Contains("virgo"));object snapshot=null,detail=null,nav=null;
+   if(target!=null){snapshot=await b.Call("wait_threads",J.Obj("targets",new[]{J.Obj("threadId",J.Str(target,"id"),"hostId",J.Str(target,"hostId"))},"timeoutMs",0));var raw=await b.Call("read_thread",J.Obj("threadId",J.Str(target,"id"),"hostId",J.Str(target,"hostId"),"turnLimit",1,"includeOutputs",false,"maxOutputCharsPerItem",200));detail=J.Obj("turnCount",J.Arr(J.Get(raw,"turns")).Length);}
+   int open=Array.IndexOf(args,"--open");if(open>=0&&open+1<args.Length)nav=await b.Call("navigate_to_codex_page",J.Obj("threadId",args[open+1]));
+   var usage=new Usage();usage.Update(await b.Call("get_usage_limits",J.Obj()));
+   File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"probe-result.json"),J.Json(J.Obj("ok",true,"autoDiscovered",true,"context",b.ContextId,"tasks",threads.Select(t=>J.Obj("title",J.Str(t,"title"),"host",J.Str(t,"hostId"),"status",J.Str(t,"status"))).ToArray(),"remoteSnapshot",snapshot,"detail",detail,"navigation",nav,"weeklyRemaining",usage.WeeklyRemaining,"resetCardCount",usage.Count,"resetCardExpiry",usage.Credits.Select(c=>c.Expires).ToArray())));
+  }
+  static int SelfTest(){try{var s=new Settings{Count=2};Card a=new Card{Id="a",Host="local",Interaction=10},b=new Card{Id="b",Host="remote-ssh-discovered:virgo",Interaction=20},c=new Card{Id="c",Host="local",Interaction=30};if(Card.Sort(new[]{a,b,c},s)[0]!=c)throw new Exception("recency");s.Clicks[a.Key]=40;if(Card.Sort(new[]{a,b,c},s)[0]!=a)throw new Exception("click recency");s.Host=b.Host;if(Card.Sort(new[]{a,b,c},s).Length!=1)throw new Exception("host filter");var u=new Usage();u.Update(J.Parse("{\"rateLimits\":{\"primary\":{\"usedPercent\":29,\"windowDurationMins\":10080,\"resetsAt\":123}},\"rateLimitResetCredits\":{\"availableCount\":1,\"credits\":[{\"status\":\"available\",\"expiresAt\":456}]}}"));if(u.WeeklyRemaining!=71||u.Credits[0].Expires!=456)throw new Exception("usage");u.Update(J.Parse("{}"));if(u.WeeklyRemaining!=null||u.Count!=null)throw new Exception("missing usage");a.Snapshot(J.Parse("{\"thread\":{\"status\":{\"type\":\"active\",\"activeFlags\":[\"waitingOnApproval\"]}},\"latestTurn\":{\"id\":\"t\",\"status\":\"inProgress\",\"startedAt\":55}}"));if(a.Status!="approval"||a.Interaction!=55)throw new Exception("approval state");File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: recency, click ordering, host filtering, weekly usage, card expiry, missing data, approval status.");return 0;}catch(Exception e){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),e.ToString());return 1;}}
+ }
+}
+
+
+
