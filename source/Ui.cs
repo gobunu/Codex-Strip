@@ -41,13 +41,13 @@ namespace CodexStrip {
  }
  public partial class StripWindow:Window {
   public bool TrayMode,Exiting; public readonly Settings Config;public readonly MonitorEngine Engine;public readonly bool DemoMode;
-  string renderedCards="";Grid cards;TextBlock connection,footer,brandTitle;Button quota,settingsButton,dockButton,fullscreenButton;string dockVisual="";UsageWindow usageWindow;SettingsWindow settingsWindow;readonly DispatcherTimer liveTick=new DispatcherTimer();bool liveDirty;readonly DispatcherTimer tick=new DispatcherTimer(),clock=new DispatcherTimer();bool closing;public Action OnFirstData;
+  string renderedCards="";Grid cards;TextBlock connection,footer,brandTitle;Button quota,settingsButton,dockButton,fullscreenButton;string dockVisual="",scaleMonitor="";UsageWindow usageWindow;SettingsWindow settingsWindow;readonly DispatcherTimer liveTick=new DispatcherTimer();bool liveDirty;readonly DispatcherTimer tick=new DispatcherTimer(),clock=new DispatcherTimer();bool closing;public Action OnFirstData;
   public double UiWidth {get{return ActualWidth/Config.UiScale;}}
   public double UiHeight {get{return ActualHeight/Config.UiScale;}}
   public StripWindow(bool demoMode=false){DemoMode=demoMode;Config=Settings.Load();Engine=new MonitorEngine(Config);Title="Codex Strip";MinWidth=320*Config.UiScale;MinHeight=210*Config.UiScale;Width=Config.Width;Height=Math.Max(MinHeight,Config.Height);Left=Config.Left;Top=Config.Top;Topmost=Config.Topmost;
    if(Left+Width<SystemParameters.VirtualScreenLeft+30||Left>SystemParameters.VirtualScreenLeft+SystemParameters.VirtualScreenWidth-30||Top+Height<SystemParameters.VirtualScreenTop+30||Top>SystemParameters.VirtualScreenTop+SystemParameters.VirtualScreenHeight-30){Left=SystemParameters.WorkArea.Left+40;Top=SystemParameters.WorkArea.Top+60;}
-   SourceInitialized+=delegate{var source=System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle);source.AddHook((IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled)=>{if(msg==0x232&&!Docked){RememberCurrentThickness();Save();}return IntPtr.Zero;});};
-   LocationChanged+=delegate{UpdateDockButton();};ApplyTheme();SizeChanged+=delegate{ResizePanels();RenderCards();RenderFooter();RebuildPanel();};Engine.Changed=()=>{if(closing)return;Render();if(Engine.Connected&&OnFirstData!=null){var cb=OnFirstData;OnFirstData=null;cb();}};
+   SourceInitialized+=delegate{var source=System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle);source.AddHook((IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled)=>{if(msg==0x232&&!Docked){RememberCurrentThickness();Save();}return IntPtr.Zero;});ApplyMonitorScale();};
+   LocationChanged+=delegate{UpdateDockButton();ApplyMonitorScale();};ApplyTheme();SizeChanged+=delegate{ResizePanels();RenderCards();RenderFooter();RebuildPanel();};Engine.Changed=()=>{if(closing)return;Render();if(Engine.Connected&&OnFirstData!=null){var cb=OnFirstData;OnFirstData=null;cb();}};
    tick.Interval=TimeSpan.FromSeconds(5);tick.Tick+=async delegate{if(Engine.Stream!=null)await System.Threading.Tasks.Task.Run(()=>Engine.Stream.DiscoverKnownThreads());await Refresh();};clock.Interval=TimeSpan.FromSeconds(2);clock.Tick+=async delegate{RenderFooter();if(!DemoMode){if(Engine.Stream!=null)await System.Threading.Tasks.Task.Run(()=>Engine.Stream.RefreshReadState());await Engine.RefreshLocal();}};
    liveTick.Interval=TimeSpan.FromMilliseconds(250);liveTick.Tick+=delegate{if(liveDirty&&!closing){liveDirty=false;Engine.ApplyStream();}};
    Loaded+=async delegate{StartSleepWatcher();if(!DemoMode)InitializeTopmost();if(!DemoMode&&TrayMode)InitializeDocking();if(!DemoMode){Engine.Stream=new DesktopStream();Engine.Stream.Changed=()=>Dispatcher.BeginInvoke(new Action(()=>liveDirty=true));Engine.Stream.Watch(Config.Watched.Select(p=>new Card{Id=p.Key,Host=p.Value}));Engine.Stream.Start();await System.Threading.Tasks.Task.Run(()=>Engine.Stream.DiscoverKnownThreads());liveTick.Start();}if(DemoMode){Demo();Render();}else{tick.Start();clock.Start();await Refresh();}};
@@ -59,7 +59,8 @@ namespace CodexStrip {
   void SystemThemeChanged(object sender,UserPreferenceChangedEventArgs e){if(Config.ThemeMode=="system"&&!closing)Dispatcher.BeginInvoke(new Action(ApplyTheme));}
   public void Save(){if(DemoMode)return;try{Config.Save();}catch{connection.Text="设置保存失败，请检查目录权限";}}
   public void SetTheme(string mode){Config.ThemeMode=mode;ApplyTheme();Save();}
-  public void SetUiScale(double scale){Config.UiScale=Math.Max(1,Math.Min(2,scale));MinWidth=320*Config.UiScale;MinHeight=210*Config.UiScale;ApplyTheme();Save();}
+  void ApplyMonitorScale(){if(!IsLoaded&&new System.Windows.Interop.WindowInteropHelper(this).Handle==IntPtr.Zero)return;string monitor=CurrentMonitorKey;if(monitor==scaleMonitor)return;scaleMonitor=monitor;double scale=Config.ScaleForMonitor(monitor);if(Math.Abs(Config.UiScale-scale)<.01)return;Config.UiScale=scale;MinWidth=320*scale;MinHeight=210*scale;ApplyTheme();}
+  public void SetUiScale(double scale){Config.UiScale=Math.Max(1,Math.Min(2,scale));string monitor=CurrentMonitorKey;scaleMonitor=monitor;Config.RememberScale(monitor,Config.UiScale);MinWidth=320*Config.UiScale;MinHeight=210*Config.UiScale;ApplyTheme();Save();}
   public void ApplyTheme(){if(panelLayer!=null)panelLayer.Child=null;Design.Theme(Config.ThemeMode);Design.Setup(this);Design.ScrollStyle(this);var outer=new Border{BorderBrush=Design.B(Design.Line),BorderThickness=new Thickness(1),Padding=new Thickness(14,0,14,10)};var root=new Grid{ClipToBounds=true,LayoutTransform=new ScaleTransform(Config.UiScale,Config.UiScale)};Content=root;root.Children.Add(outer);var layout=new Grid();outer.Child=layout;layout.RowDefinitions.Add(new RowDefinition{Height=new GridLength(44)});layout.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});
    var head=new DockPanel{LastChildFill=true,Background=Brushes.Transparent};layout.Children.Add(head);var actions=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};DockPanel.SetDock(actions,Dock.Right);head.Children.Add(actions);
    quota=Design.Button("周剩余 —");quota.Background=Design.B(Design.Surface);quota.BorderBrush=Design.B(Design.Line);quota.Margin=new Thickness(0,0,6,0);quota.Click+=delegate{ShowUsage();};actions.Children.Add(quota);
@@ -107,6 +108,5 @@ namespace CodexStrip {
   public void SnapshotSettingsBottom(string path){if(!(activePanel is SettingsWindow))ShowSettings();ResizePanels();settingsWindow.ScrollBottom();Design.Capture(this,path);}
  }
 }
-
 
 
