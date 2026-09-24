@@ -38,8 +38,10 @@ namespace CodexStrip {
  }
  public sealed class Card {
   public string Id,Host,Title,Status="unknown",Message="",MessageKind="",TurnId="",LastError="",Cursor="";
-  public double Interaction,Started,LastSeen,DetailFetched; public bool Stale,QuestionPending,MessageUnavailable,Live,Unread,CompletionPending;
+  public double Interaction,Started,LastSeen,DetailFetched,UnreadUpdated; public bool Stale,QuestionPending,MessageUnavailable,Live,Unread,UnreadKnown,CompletionPending;
   public bool UnreadResult {get{return Status=="completed"&&(Unread||CompletionPending)&&!Stale&&!QuestionPending;}}
+  public void SetUnread(bool unread,double observedAt){if(UnreadKnown&&observedAt<UnreadUpdated)return;Unread=unread;UnreadKnown=true;UnreadUpdated=observedAt;}
+  public void MergeUnread(Card other){if(other!=null&&other.UnreadKnown)SetUnread(other.Unread,other.UnreadUpdated);}
   public Card Copy(){return (Card)MemberwiseClone();}
   public string Key {get{return Host+"/"+Id;}}
   public string HostLabel {get{return Host=="local"?"LOCAL":Host.Replace("remote-ssh-discovered:","").ToUpperInvariant();}}
@@ -77,11 +79,19 @@ namespace CodexStrip {
   public Action Changed=delegate{};public Settings Settings; bool refreshingUsage;
   public DesktopStream Stream;
   public void ApplyStream(){if(Stream==null)return;var next=Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());MergeStream(next);UpdateCompletions(Cards,next);Cards=next;Changed();}
-  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;}return live;}
-  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}ApplyLocalAnswers(cards);}
+  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;live.MergeUnread(previous);}return live;}
+  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}Stream.ApplyReadState(cards.Values);ApplyLocalAnswers(cards);}
   bool ApplyLocalAnswers(Dictionary<string,Card> cards){bool changed=false;foreach(var card in cards.Values.Where(c=>c.Host=="local")){string text;if(!localMessages.ClearAnswered(card,out text))continue;card.QuestionPending=false;if(card.Status=="input")card.Status="active";if(text.Length>0){card.Message=text;card.MessageKind="最新对话";}changed=true;}return changed;}
   public static bool NewCompletion(Card previous,Card current){return previous!=null&&!previous.Stale&&!current.Stale&&current.Status=="completed"&&new[]{"active","input","approval","reconnecting"}.Contains(previous.Status);}
-  void UpdateCompletions(Dictionary<string,Card> before,Dictionary<string,Card> after){bool changed=false;foreach(var c in after.Values){Card previous;before.TryGetValue(c.Key,out previous);string turn;if(Settings.PendingCompletions.TryGetValue(c.Key,out turn)&&turn.Length>0&&c.TurnId.Length>0&&turn!=c.TurnId){Settings.PendingCompletions.Remove(c.Key);changed=true;}if(NewCompletion(previous,c)){Settings.PendingCompletions[c.Key]=c.TurnId;changed=true;}c.CompletionPending=Settings.PendingCompletions.ContainsKey(c.Key);}if(changed)try{Settings.Save();}catch{}}
+  // Local completion markers are only a fallback while desktop read state is unknown.
+  // An explicit desktop read/unread value owns the notification, including after restart.
+  public static bool ReconcileCompletion(Settings settings,Card previous,Card current){
+   bool changed=false;string turn;
+   if(settings.PendingCompletions.TryGetValue(current.Key,out turn)&&(current.UnreadKnown||(turn.Length>0&&current.TurnId.Length>0&&turn!=current.TurnId))){settings.PendingCompletions.Remove(current.Key);changed=true;}
+   if(!current.UnreadKnown&&NewCompletion(previous,current)){settings.PendingCompletions[current.Key]=current.TurnId;changed=true;}
+   current.CompletionPending=settings.PendingCompletions.ContainsKey(current.Key);return changed;
+  }
+  void UpdateCompletions(Dictionary<string,Card> before,Dictionary<string,Card> after){bool changed=false;foreach(var c in after.Values){Card previous;before.TryGetValue(c.Key,out previous);changed=ReconcileCompletion(Settings,previous,c)||changed;}if(changed)try{Settings.Save();}catch{}}
   readonly LocalMessages localMessages=new LocalMessages(); bool readingLocal;
   readonly Func<string,object,int,Task<object>> fetch;
   public MonitorEngine(Settings s,Func<string,object,int,Task<object>> request=null){Settings=s;fetch=request;}
@@ -97,9 +107,9 @@ namespace CodexStrip {
    // Work only on detached cards; readers keep the last complete snapshot.
    var Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());bool Connected=this.Connected;string Connection=this.Connection,Unavailable=this.Unavailable;
    try {
-   object result=await Call("list_threads",J.Obj("limit",50));
+   double readObservedAt=J.Now;object result=await Call("list_threads",J.Obj("limit",50));
    var list=J.Arr(J.Get(result,"pinnedThreads")).Concat(J.Arr(J.Get(result,"threads"))).Where(t=>J.Str(t,"kind")=="codex").ToArray();
-   var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)c.Unread=(bool)J.Get(t,"isUnread");}
+   var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)c.SetUnread((bool)J.Get(t,"isUnread"),readObservedAt);}
    // Explicitly tracked links remain discoverable even when the app list omits them.
    foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title="正在读取线程"};try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
    Unavailable=J.Arr(J.Get(result,"unavailableHosts")).Length>0?"部分主机暂不可用":"";
