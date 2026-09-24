@@ -14,7 +14,7 @@ using System.Windows.Threading;
 
 namespace CodexStrip {
  public static class SleepPolicy {
-  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if(card.Stale||card.QuestionPending||card.Unread||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
+  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if(card.Stale||card.QuestionPending||card.UnreadResult||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
   public static bool Due(DateTime since,DateTime now,int minutes){return since!=DateTime.MinValue&&(now-since).TotalMinutes>=Math.Max(1,minutes);}
  }
 
