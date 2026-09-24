@@ -64,13 +64,23 @@ namespace CodexStrip {
  }
 
  public sealed class RatePoint {public DateTime Time;public double First,Second;public RatePoint(DateTime time,double first,double second){Time=time;First=first;Second=second;}}
+ public sealed class RateReading {public DateTime Time;public double? First,Second;public RateReading(DateTime time,double? first,double? second){Time=time;First=first;Second=second;}}
  public sealed class RateTrace {
   public readonly RateMotion First=new RateMotion(),Second=new RateMotion();
   public readonly List<RatePoint> History=new List<RatePoint>();
+  readonly List<RateReading> readings=new List<RateReading>();
+  DateTime displayUpdated=DateTime.MinValue;
+  public double? DisplayFirst,DisplaySecond;
   public void SetTarget(double? first,double? second,DateTime now,bool record){
    if(record&&(first.HasValue||second.HasValue)){History.Add(new RatePoint(now,First.Value,Second.Value));History.RemoveAll(p=>(now-p.Time).TotalSeconds>32);}
    First.Available=first.HasValue&&!double.IsNaN(first.Value)&&!double.IsInfinity(first.Value);Second.Available=second.HasValue&&!double.IsNaN(second.Value)&&!double.IsInfinity(second.Value);
    First.Target=First.Available?Math.Max(0,first.Value):0;Second.Target=Second.Available?Math.Max(0,second.Value):0;
+   if(record){
+    readings.Add(new RateReading(now,First.Available?(double?)First.Target:null,Second.Available?(double?)Second.Target:null));readings.RemoveAll(p=>(now-p.Time).TotalSeconds>=5);
+    if(displayUpdated==DateTime.MinValue||(now-displayUpdated).TotalSeconds>=3||(!DisplayFirst.HasValue&&First.Available)||(!DisplaySecond.HasValue&&Second.Available)){
+     DisplayFirst=readings.Select(p=>p.First).Average();DisplaySecond=readings.Select(p=>p.Second).Average();displayUpdated=now;
+    }
+   }
   }
   public bool Step(double seconds){bool first=First.Step(seconds),second=Second.Step(seconds);return first||second;}
   public void Snap(){First.Snap();Second.Snap();}
@@ -78,7 +88,7 @@ namespace CodexStrip {
 
  public partial class StripWindow {
   sealed class RingVisual {public Canvas Canvas;public TextBlock Label;public double Diameter;}
-  sealed class RateVisual {public Canvas Canvas;public TextBlock First,Second;public double Width,Height;}
+  sealed class RateVisual {public Canvas Canvas;public double Width,Height;}
   Grid sleepLayer;Border taskPage;UniformGrid sleepTiles;TextBlock sleepClock;
   readonly DispatcherTimer sleepTicker=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};
   readonly DispatcherTimer ringTicker=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(33)};
@@ -137,7 +147,7 @@ namespace CodexStrip {
    Grid.SetRow(metricSurface,1);content.Children.Add(metricSurface);
   }
 
-  string Speed(double? bytes){if(!bytes.HasValue)return "—";double value=Math.Max(0,bytes.Value);if(Config.SleepSpeedUnit=="mb")return (value/1048576).ToString("0.0")+" MB/s";if(Config.SleepSpeedUnit=="mbps")return (value*8/1000000).ToString("0.0")+" Mb/s";if(value>=1048576)return (value/1048576).ToString("0.0")+" MB/s";if(value>=1024)return (value/1024).ToString("0.0")+" KB/s";return value.ToString("0")+" B/s";}
+  string Speed(double? bytes){if(!bytes.HasValue)return "—";double value=Math.Max(0,bytes.Value);if(Config.SleepSpeedUnit=="mb")return (value/1048576).ToString("0.0")+" MB/s";if(Config.SleepSpeedUnit=="mbps")return (value*8/1000000).ToString("0.0")+" Mb/s";if(value>=1048576)return (value/1048576).ToString("0.0")+" MB/s";if(value>=1024)return (value/1024).ToString("0")+" KB/s";return value.ToString("0")+" B/s";}
   string Percent(double? value){return value.HasValue?value.Value.ToString("0")+"%":"—";}
   RingMetricMotion RingState(string id){RingMetricMotion state;if(!ringMotions.TryGetValue(id,out state)){state=new RingMetricMotion();ringMotions[id]=state;}return state;}
   RateTrace RateState(string id){RateTrace state;if(!rateTraces.TryGetValue(id,out state)){state=new RateTrace();rateTraces[id]=state;}return state;}
@@ -162,7 +172,6 @@ namespace CodexStrip {
     points.Add(new Point(width,height-2-Math.Min(1,motion.Value/peak)*(height-4)));
     canvas.Children.Add(new System.Windows.Shapes.Path{Data=RateCurve(points),Stroke=new SolidColorBrush(Shade(accent,channel==0?0:2)),StrokeThickness=2,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,ToolTip=(id=="network"?(channel==0?"下载":"上传"):(channel==0?"读取":"写入"))+" · 最近 30 秒"});
    }
-   visual.First.Text=Speed(state.First.Available?(double?)state.First.Value:null);visual.Second.Text=Speed(state.Second.Available?(double?)state.Second.Value:null);
   }
   void DrawRing(string id,RingVisual visual){
    var state=RingState(id);var canvas=visual.Canvas;double diameter=visual.Diameter,center=diameter/2,radius=center-11,thickness=diameter>=120?14:10;
@@ -191,18 +200,19 @@ namespace CodexStrip {
     if(Config.SleepRingCharts)AddRingMetric(values,id,id=="cpu"?resources.CpuProcesses:id=="gpu"?resources.GpuProcesses:resources.MemoryProcesses);
     else{var number=Design.Text(Percent(amount),34,SleepInk);number.FontWeight=FontWeights.SemiBold;values.Children.Add(number);var rail=new Border{Height=3,CornerRadius=new CornerRadius(2),Background=Design.B(SleepLine),Margin=new Thickness(0,12,0,0)};var fill=new Border{Height=3,CornerRadius=new CornerRadius(2),Background=Accent(),HorizontalAlignment=HorizontalAlignment.Left};rail.Child=fill;rail.SizeChanged+=(s,e)=>fill.Width=Math.Max(0,rail.ActualWidth*(amount??0)/100);values.Children.Add(rail);}
    }else{
+    var rate=RateState(id);
     Color accent=((SolidColorBrush)Accent()).Color;
     var primary=new StackPanel{Orientation=Orientation.Horizontal};
     primary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=new SolidColorBrush(Shade(accent,0)),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
     primary.Children.Add(Design.Text(id=="network"?"下载":"读取",11,SleepMuted));
-    var first=Design.Text("—",24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
+    var first=Design.Text(Speed(rate.DisplayFirst),24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
     var secondary=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,8,0,0)};
     secondary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=new SolidColorBrush(Shade(accent,2)),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
     secondary.Children.Add(Design.Text(id=="network"?"上传":"写入",11,SleepMuted));
-    var second=Design.Text("—",17,SleepMuted);second.Margin=new Thickness(10,0,0,0);secondary.Children.Add(second);values.Children.Add(secondary);
+    var second=Design.Text(Speed(rate.DisplaySecond),17,SleepMuted);second.Margin=new Thickness(10,0,0,0);secondary.Children.Add(second);values.Children.Add(secondary);
     double width=Math.Max(120,sleepTiles.Width/Math.Max(1,columns)-40),height=UiHeight<245?25:40;
     var graph=new Canvas{Width=width,Height=height,Margin=new Thickness(0,6,0,0),ToolTip="最近 30 秒趋势 · 纵轴按峰值自动缩放"};values.Children.Add(graph);
-    var visual=new RateVisual{Canvas=graph,First=first,Second=second,Width=width,Height=height};rateVisuals[id]=visual;DrawRateTrace(id,visual,DateTime.UtcNow);
+    var visual=new RateVisual{Canvas=graph,Width=width,Height=height};rateVisuals[id]=visual;DrawRateTrace(id,visual,DateTime.UtcNow);
    }
    sleepTiles.Children.Add(cell);
   }
