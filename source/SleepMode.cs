@@ -47,27 +47,59 @@ namespace CodexStrip {
   public bool Step(double seconds){bool moving=Total.Step(seconds);foreach(string name in Order.ToArray()){var motion=Parts[name];moving=motion.Step(seconds)||moving;if(motion.Target==0&&motion.Value==0){Parts.Remove(name);Order.Remove(name);}}return moving;}
  }
 
+ public sealed class RateMotion {
+  public double Value,Velocity,Target;public bool Available;
+  public bool Step(double seconds){
+   double dt=Math.Max(0,Math.Min(.05,seconds));
+   double span=Math.Max(1024,Math.Max(Value,Target));
+   double acceleration=Math.Max(-12*span,Math.Min(12*span,36*(Target-Value)-10*Velocity));
+   Velocity=Math.Max(-3*span,Math.Min(3*span,Velocity+acceleration*dt));
+   double next=Value+Velocity*dt;
+   if((Target-Value)*(Target-next)<0){Value=Target;Velocity=0;}
+   else Value=Math.Max(0,next);
+   if(Math.Abs(Target-Value)<Math.Max(1,span*.0003)&&Math.Abs(Velocity)<Math.Max(1,span*.002)){Value=Target;Velocity=0;}
+   return Velocity!=0||Math.Abs(Target-Value)>=1;
+  }
+  public void Snap(){Value=Target;Velocity=0;}
+ }
+
+ public sealed class RatePoint {public DateTime Time;public double First,Second;public RatePoint(DateTime time,double first,double second){Time=time;First=first;Second=second;}}
+ public sealed class RateTrace {
+  public readonly RateMotion First=new RateMotion(),Second=new RateMotion();
+  public readonly List<RatePoint> History=new List<RatePoint>();
+  public void SetTarget(double? first,double? second,DateTime now,bool record){
+   if(record&&(first.HasValue||second.HasValue)){History.Add(new RatePoint(now,First.Value,Second.Value));History.RemoveAll(p=>(now-p.Time).TotalSeconds>32);}
+   First.Available=first.HasValue&&!double.IsNaN(first.Value)&&!double.IsInfinity(first.Value);Second.Available=second.HasValue&&!double.IsNaN(second.Value)&&!double.IsInfinity(second.Value);
+   First.Target=First.Available?Math.Max(0,first.Value):0;Second.Target=Second.Available?Math.Max(0,second.Value):0;
+  }
+  public bool Step(double seconds){bool first=First.Step(seconds),second=Second.Step(seconds);return first||second;}
+  public void Snap(){First.Snap();Second.Snap();}
+ }
+
  public partial class StripWindow {
   sealed class RingVisual {public Canvas Canvas;public TextBlock Label;public double Diameter;}
+  sealed class RateVisual {public Canvas Canvas;public TextBlock First,Second;public double Width,Height;}
   Grid sleepLayer;Border taskPage;UniformGrid sleepTiles;TextBlock sleepClock;
   readonly DispatcherTimer sleepTicker=new DispatcherTimer{Interval=TimeSpan.FromSeconds(1)};
   readonly DispatcherTimer ringTicker=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(33)};
   readonly Dictionary<string,RingMetricMotion> ringMotions=new Dictionary<string,RingMetricMotion>();
   readonly Dictionary<string,RingVisual> ringVisuals=new Dictionary<string,RingVisual>();
+  readonly Dictionary<string,RateTrace> rateTraces=new Dictionary<string,RateTrace>();
+  readonly Dictionary<string,RateVisual> rateVisuals=new Dictionary<string,RateVisual>();
   DateTime lastRingFrame=DateTime.MinValue;
   readonly ResourceSampler sampler=new ResourceSampler();ResourceSnapshot resources=new ResourceSnapshot();
   DateTime quietSince=DateTime.MinValue;bool sleeping,sampling,sleepWallpaperActive,sleepPortraitLayout;
   public bool Sleeping {get{return sleeping;}}
   public void StartSleepWatcher(){sleepTicker.Tick+=SleepTick;sleepTicker.Start();ringTicker.Tick+=RingTick;EvaluateSleep();}
   public void StopSleepWatcher(){sleepTicker.Stop();sleepTicker.Tick-=SleepTick;ringTicker.Stop();ringTicker.Tick-=RingTick;sampler.Dispose();}
-  async void SleepTick(object sender,EventArgs e){EvaluateSleep();if(!sleeping||sampling||!IsVisible)return;sampling=true;try{ResourceSnapshot next=DemoMode?DemoResources():await Task.Run(()=>sampler.Sample(Config.SleepAdapterId));if(sleeping&&!closing){resources=next;SetRingTargets();UpdateSleepView();StartRingAnimation();}}catch{}finally{sampling=false;}}
-  static ResourceSnapshot DemoResources(){double t=DateTime.Now.Second;return new ResourceSnapshot{Cpu=28+t%9,Gpu=17+t%7,Memory=63.4,Download=4.8*1024*1024,Upload=720*1024,DiskRead=2.1*1024*1024,DiskWrite=820*1024,NetworkName="演示网卡",CpuProcesses=new[]{new ResourcePart("Codex",11),new ResourcePart("浏览器",7),new ResourcePart("系统服务",4)},GpuProcesses=new[]{new ResourcePart("浏览器",9),new ResourcePart("Codex",5),new ResourcePart("桌面窗口",3)},MemoryProcesses=new[]{new ResourcePart("浏览器",17),new ResourcePart("Codex",11),new ResourcePart("桌面窗口",5)}};}
+  async void SleepTick(object sender,EventArgs e){EvaluateSleep();if(!sleeping||sampling||!IsVisible)return;sampling=true;try{ResourceSnapshot next=DemoMode?DemoResources():await Task.Run(()=>sampler.Sample(Config.SleepAdapterId));if(sleeping&&!closing){resources=next;SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}}catch{}finally{sampling=false;}}
+  static ResourceSnapshot DemoResources(){double t=DateTime.Now.Second,phase=DateTime.Now.TimeOfDay.TotalSeconds;return new ResourceSnapshot{Cpu=28+t%9,Gpu=17+t%7,Memory=63.4,Download=(3.8+1.5*Math.Sin(phase*1.2))*1024*1024,Upload=(.7+.3*Math.Sin(phase*.8+1))*1024*1024,DiskRead=(2.1+1.2*Math.Sin(phase*.9))*1024*1024,DiskWrite=(.8+.4*Math.Sin(phase*.6+2))*1024*1024,NetworkName="演示网卡",CpuProcesses=new[]{new ResourcePart("Codex",11),new ResourcePart("浏览器",7),new ResourcePart("系统服务",4)},GpuProcesses=new[]{new ResourcePart("浏览器",9),new ResourcePart("Codex",5),new ResourcePart("桌面窗口",3)},MemoryProcesses=new[]{new ResourcePart("浏览器",17),new ResourcePart("Codex",11),new ResourcePart("桌面窗口",5)}};}
   public void ShowSleepDemo(){resources=DemoResources();SetSleeping(true);}
   public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&sleepLayer.Visibility==Visibility.Collapsed&&taskPage.Visibility==Visibility.Visible;}
   public void EvaluateSleep(){if(DemoMode)return;if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}if(PanelOpen){quietSince=DateTime.UtcNow;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping)WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}
   public void WakeSleep(){if(sleeping)SetSleeping(false);quietSince=DateTime.UtcNow;}
-  void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;if(taskPage!=null)taskPage.Visibility=value?Visibility.Collapsed:Visibility.Visible;if(sleepLayer!=null)sleepLayer.Visibility=value?Visibility.Visible:Visibility.Collapsed;if(value){SetRingTargets();UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
-  public void RefreshSleepAppearance(){if(sleepLayer==null)return;BuildSleepBackground();SetRingTargets();UpdateSleepView();StartRingAnimation();}
+  void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;if(taskPage!=null)taskPage.Visibility=value?Visibility.Collapsed:Visibility.Visible;if(sleepLayer!=null)sleepLayer.Visibility=value?Visibility.Visible:Visibility.Collapsed;if(value){SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
+  public void RefreshSleepAppearance(){if(sleepLayer==null)return;BuildSleepBackground();SetRingTargets();SetRateTargets(false);UpdateSleepView();StartRingAnimation();}
   public void BuildSleepLayer(Grid root,Border dashboard){taskPage=dashboard;sleepLayer=new Grid{Visibility=sleeping?Visibility.Visible:Visibility.Collapsed,ClipToBounds=true,Cursor=Cursors.Hand};root.Children.Add(sleepLayer);sleepLayer.PreviewMouseLeftButtonDown+=(s,e)=>{WakeSleep();e.Handled=true;};BuildSleepBackground();UpdateSleepView();taskPage.Visibility=sleeping?Visibility.Collapsed:Visibility.Visible;}
 
   string SleepInk {get{return sleepWallpaperActive?"#FFFFFF":Design.Ink;}}
@@ -108,13 +140,30 @@ namespace CodexStrip {
   string Speed(double? bytes){if(!bytes.HasValue)return "—";double value=Math.Max(0,bytes.Value);if(Config.SleepSpeedUnit=="mb")return (value/1048576).ToString("0.0")+" MB/s";if(Config.SleepSpeedUnit=="mbps")return (value*8/1000000).ToString("0.0")+" Mb/s";if(value>=1048576)return (value/1048576).ToString("0.0")+" MB/s";if(value>=1024)return (value/1024).ToString("0.0")+" KB/s";return value.ToString("0")+" B/s";}
   string Percent(double? value){return value.HasValue?value.Value.ToString("0")+"%":"—";}
   RingMetricMotion RingState(string id){RingMetricMotion state;if(!ringMotions.TryGetValue(id,out state)){state=new RingMetricMotion();ringMotions[id]=state;}return state;}
+  RateTrace RateState(string id){RateTrace state;if(!rateTraces.TryGetValue(id,out state)){state=new RateTrace();rateTraces[id]=state;}return state;}
   void SetRingTargets(){RingState("cpu").SetTarget(resources.Cpu,resources.CpuProcesses);RingState("gpu").SetTarget(resources.Gpu,resources.GpuProcesses);RingState("memory").SetTarget(resources.Memory,resources.MemoryProcesses);if(!Config.SleepSmoothRings)foreach(var state in ringMotions.Values)state.Snap();}
-  void StartRingAnimation(){if(!sleeping||!Config.SleepRingCharts||!Config.SleepSmoothRings||!IsVisible||ringVisuals.Count==0){ringTicker.Stop();return;}lastRingFrame=DateTime.UtcNow;if(!ringTicker.IsEnabled)ringTicker.Start();}
-  void RingTick(object sender,EventArgs e){if(!sleeping||!Config.SleepRingCharts||!Config.SleepSmoothRings||!IsVisible){ringTicker.Stop();lastRingFrame=DateTime.MinValue;return;}DateTime now=DateTime.UtcNow;double seconds=lastRingFrame==DateTime.MinValue?.033:(now-lastRingFrame).TotalSeconds;lastRingFrame=now;bool moving=false;foreach(var pair in ringMotions)moving=pair.Value.Step(seconds)||moving;foreach(var pair in ringVisuals)DrawRing(pair.Key,pair.Value);if(!moving)ringTicker.Stop();}
+  void SetRateTargets(bool record){DateTime now=DateTime.UtcNow;RateState("network").SetTarget(resources.Download,resources.Upload,now,record);RateState("disk").SetTarget(resources.DiskRead,resources.DiskWrite,now,record);if(!Config.SleepSmoothRings)foreach(var state in rateTraces.Values)state.Snap();}
+  void StartRingAnimation(){if(!sleeping||!Config.SleepSmoothRings||!IsVisible||(ringVisuals.Count==0&&rateVisuals.Count==0)){ringTicker.Stop();return;}lastRingFrame=DateTime.UtcNow;if(!ringTicker.IsEnabled)ringTicker.Start();}
+  void RingTick(object sender,EventArgs e){if(!sleeping||!Config.SleepSmoothRings||!IsVisible){ringTicker.Stop();lastRingFrame=DateTime.MinValue;return;}DateTime now=DateTime.UtcNow;double seconds=lastRingFrame==DateTime.MinValue?.033:(now-lastRingFrame).TotalSeconds;lastRingFrame=now;bool moving=false;foreach(var pair in ringMotions)moving=pair.Value.Step(seconds)||moving;foreach(var pair in rateTraces)moving=pair.Value.Step(seconds)||moving;foreach(var pair in ringVisuals)DrawRing(pair.Key,pair.Value);foreach(var pair in rateVisuals)DrawRateTrace(pair.Key,pair.Value,now);if(!moving&&rateVisuals.Count==0)ringTicker.Stop();}
   static Geometry Arc(double center,double radius,double start,double sweep){double a=start*Math.PI/180,b=(start+Math.Min(359.8,sweep))*Math.PI/180;var figure=new PathFigure{StartPoint=new Point(center+radius*Math.Cos(a),center+radius*Math.Sin(a)),IsClosed=false};figure.Segments.Add(new ArcSegment{Point=new Point(center+radius*Math.Cos(b),center+radius*Math.Sin(b)),Size=new Size(radius,radius),SweepDirection=SweepDirection.Clockwise,IsLargeArc=sweep>180});return new PathGeometry(new[]{figure});}
   static Color Shade(Color baseColor,int index){double mix=new[]{0,.18,.32,.46,.6}[Math.Min(4,index)];return Color.FromRgb((byte)Math.Round(baseColor.R+(255-baseColor.R)*mix),(byte)Math.Round(baseColor.G+(255-baseColor.G)*mix),(byte)Math.Round(baseColor.B+(255-baseColor.B)*mix));}
   static void RingBase(Canvas canvas,double center,double radius,double thickness,Brush color){var circle=new System.Windows.Shapes.Ellipse{Width=radius*2,Height=radius*2,Stroke=color,StrokeThickness=thickness};Canvas.SetLeft(circle,center-radius);Canvas.SetTop(circle,center-radius);canvas.Children.Add(circle);}
   static void RingArc(Canvas canvas,double center,double radius,double thickness,double start,double sweep,Brush color,string tip){if(sweep<=.2)return;double gap=Math.Min(1.2,sweep/8);var segment=new System.Windows.Shapes.Path{Data=Arc(center,radius,start+gap,sweep-2*gap),Stroke=color,StrokeThickness=thickness,StrokeStartLineCap=PenLineCap.Flat,StrokeEndLineCap=PenLineCap.Flat,ToolTip=tip};canvas.Children.Add(segment);}
+  static Geometry RateCurve(IList<Point> points){if(points.Count<2)return Geometry.Empty;var figure=new PathFigure{StartPoint=points[0],IsClosed=false};for(int i=1;i<points.Count;i++){Point a=points[i-1],b=points[i];double third=(b.X-a.X)/3;figure.Segments.Add(new BezierSegment(new Point(a.X+third,a.Y),new Point(b.X-third,b.Y),b,true));}return new PathGeometry(new[]{figure});}
+  void DrawRateTrace(string id,RateVisual visual,DateTime now){
+   var state=RateState(id);var canvas=visual.Canvas;canvas.Children.Clear();
+   double width=visual.Width,height=visual.Height;var history=state.History.Where(p=>(now-p.Time).TotalSeconds<=30).ToArray();double spanSeconds=history.Length==0?30:Math.Max(4,Math.Min(30,(now-history[0].Time).TotalSeconds));
+   double peak=Math.Max(256*1024,Math.Max(state.First.Value,state.Second.Value));foreach(var point in history)peak=Math.Max(peak,Math.Max(point.First,point.Second));peak*=1.12;
+   for(int line=1;line<=2;line++){double y=height*line/3;canvas.Children.Add(new System.Windows.Shapes.Line{X1=0,X2=width,Y1=y,Y2=y,Stroke=Design.B(SleepLine),StrokeThickness=.6,Opacity=.55});}
+   Color accent=((SolidColorBrush)Accent()).Color;
+   for(int channel=0;channel<2;channel++){
+    var motion=channel==0?state.First:state.Second;if(!motion.Available&&motion.Value<=0)continue;
+    var points=new List<Point>();foreach(var item in history){double age=(now-item.Time).TotalSeconds;if(age<0||age>30)continue;double value=channel==0?item.First:item.Second;points.Add(new Point(width-age*width/spanSeconds,height-2-Math.Min(1,value/peak)*(height-4)));}
+    points.Add(new Point(width,height-2-Math.Min(1,motion.Value/peak)*(height-4)));
+    canvas.Children.Add(new System.Windows.Shapes.Path{Data=RateCurve(points),Stroke=new SolidColorBrush(Shade(accent,channel==0?0:2)),StrokeThickness=2,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,ToolTip=(id=="network"?(channel==0?"下载":"上传"):(channel==0?"读取":"写入"))+" · 最近 30 秒"});
+   }
+   visual.First.Text=Speed(state.First.Available?(double?)state.First.Value:null);visual.Second.Text=Speed(state.Second.Available?(double?)state.Second.Value:null);
+  }
   void DrawRing(string id,RingVisual visual){
    var state=RingState(id);var canvas=visual.Canvas;double diameter=visual.Diameter,center=diameter/2,radius=center-11,thickness=diameter>=120?14:10;
    canvas.Children.Clear();var baseColor=((SolidColorBrush)Accent()).Color;RingBase(canvas,center,radius,thickness,Design.B(SleepLine));
@@ -142,15 +191,21 @@ namespace CodexStrip {
     if(Config.SleepRingCharts)AddRingMetric(values,id,id=="cpu"?resources.CpuProcesses:id=="gpu"?resources.GpuProcesses:resources.MemoryProcesses);
     else{var number=Design.Text(Percent(amount),34,SleepInk);number.FontWeight=FontWeights.SemiBold;values.Children.Add(number);var rail=new Border{Height=3,CornerRadius=new CornerRadius(2),Background=Design.B(SleepLine),Margin=new Thickness(0,12,0,0)};var fill=new Border{Height=3,CornerRadius=new CornerRadius(2),Background=Accent(),HorizontalAlignment=HorizontalAlignment.Left};rail.Child=fill;rail.SizeChanged+=(s,e)=>fill.Width=Math.Max(0,rail.ActualWidth*(amount??0)/100);values.Children.Add(rail);}
    }else{
+    Color accent=((SolidColorBrush)Accent()).Color;
     var primary=new StackPanel{Orientation=Orientation.Horizontal};
+    primary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=new SolidColorBrush(Shade(accent,0)),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
     primary.Children.Add(Design.Text(id=="network"?"下载":"读取",11,SleepMuted));
-    var first=Design.Text(Speed(id=="network"?resources.Download:resources.DiskRead),24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
+    var first=Design.Text("—",24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
     var secondary=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,8,0,0)};
+    secondary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=new SolidColorBrush(Shade(accent,2)),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
     secondary.Children.Add(Design.Text(id=="network"?"上传":"写入",11,SleepMuted));
-    var second=Design.Text(Speed(id=="network"?resources.Upload:resources.DiskWrite),17,SleepMuted);second.Margin=new Thickness(10,0,0,0);secondary.Children.Add(second);values.Children.Add(secondary);
+    var second=Design.Text("—",17,SleepMuted);second.Margin=new Thickness(10,0,0,0);secondary.Children.Add(second);values.Children.Add(secondary);
+    double width=Math.Max(120,sleepTiles.Width/Math.Max(1,columns)-40),height=UiHeight<245?25:40;
+    var graph=new Canvas{Width=width,Height=height,Margin=new Thickness(0,6,0,0),ToolTip="最近 30 秒趋势 · 纵轴按峰值自动缩放"};values.Children.Add(graph);
+    var visual=new RateVisual{Canvas=graph,First=first,Second=second,Width=width,Height=height};rateVisuals[id]=visual;DrawRateTrace(id,visual,DateTime.UtcNow);
    }
    sleepTiles.Children.Add(cell);
   }
-  void UpdateSleepView(){if(sleepTiles==null)return;if(IsLoaded&&sleepPortraitLayout!=Portrait)BuildSleepBackground();if(sleepClock!=null)sleepClock.Text=DateTime.Now.ToString("HH:mm");sleepTiles.Children.Clear();ringVisuals.Clear();var ids=Config.SleepWidgets.Where(Settings.SleepWidgetIds.Contains).Distinct().ToArray();if(ids.Length==0)ids=new[]{"cpu"};int columns=Portrait?(UiWidth>=560?2:1):ids.Length;sleepTiles.Columns=Math.Max(1,columns);sleepTiles.Rows=(int)Math.Ceiling(ids.Length/(double)columns);sleepTiles.Width=Math.Max(1,Portrait?UiWidth-42:Math.Max(UiWidth-42,ids.Length*228));for(int i=0;i<ids.Length;i++)AddMetric(ids[i],i,columns);}
+  void UpdateSleepView(){if(sleepTiles==null)return;if(IsLoaded&&sleepPortraitLayout!=Portrait)BuildSleepBackground();if(sleepClock!=null)sleepClock.Text=DateTime.Now.ToString("HH:mm");sleepTiles.Children.Clear();ringVisuals.Clear();rateVisuals.Clear();var ids=Config.SleepWidgets.Where(Settings.SleepWidgetIds.Contains).Distinct().ToArray();if(ids.Length==0)ids=new[]{"cpu"};int columns=Portrait?(UiWidth>=560?2:1):ids.Length;sleepTiles.Columns=Math.Max(1,columns);sleepTiles.Rows=(int)Math.Ceiling(ids.Length/(double)columns);sleepTiles.Width=Math.Max(1,Portrait?UiWidth-42:Math.Max(UiWidth-42,ids.Length*228));for(int i=0;i<ids.Length;i++)AddMetric(ids[i],i,columns);}
  }
 }

@@ -78,7 +78,8 @@ namespace CodexStrip {
   public DesktopStream Stream;
   public void ApplyStream(){if(Stream==null)return;var next=Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());MergeStream(next);UpdateCompletions(Cards,next);Cards=next;Changed();}
   public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;}return live;}
-  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}}
+  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}ApplyLocalAnswers(cards);}
+  bool ApplyLocalAnswers(Dictionary<string,Card> cards){bool changed=false;foreach(var card in cards.Values.Where(c=>c.Host=="local")){string text;if(!localMessages.ClearAnswered(card,out text))continue;card.QuestionPending=false;if(card.Status=="input")card.Status="active";if(text.Length>0){card.Message=text;card.MessageKind="最新对话";}changed=true;}return changed;}
   public static bool NewCompletion(Card previous,Card current){return previous!=null&&!previous.Stale&&!current.Stale&&current.Status=="completed"&&new[]{"active","input","approval","reconnecting"}.Contains(previous.Status);}
   void UpdateCompletions(Dictionary<string,Card> before,Dictionary<string,Card> after){bool changed=false;foreach(var c in after.Values){Card previous;before.TryGetValue(c.Key,out previous);string turn;if(Settings.PendingCompletions.TryGetValue(c.Key,out turn)&&turn.Length>0&&c.TurnId.Length>0&&turn!=c.TurnId){Settings.PendingCompletions.Remove(c.Key);changed=true;}if(NewCompletion(previous,c)){Settings.PendingCompletions[c.Key]=c.TurnId;changed=true;}c.CompletionPending=Settings.PendingCompletions.ContainsKey(c.Key);}if(changed)try{Settings.Save();}catch{}}
   readonly LocalMessages localMessages=new LocalMessages(); bool readingLocal;
@@ -86,11 +87,11 @@ namespace CodexStrip {
   public MonitorEngine(Settings s,Func<string,object,int,Task<object>> request=null){Settings=s;fetch=request;}
   Task<object> Call(string tool,object args,int timeout=12000){return fetch==null?Bridge.Call(tool,args,timeout):fetch(tool,args,timeout);}
   public async Task RefreshLocal(){if(readingLocal||Refreshing)return;readingLocal=true;try{
-   var current=Cards;var shown=Card.Sort(current.Values,Settings).Where(c=>c.Host=="local"&&!c.Live).ToArray();var updates=new Dictionary<string,string>();
-   foreach(var c in shown){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0&&(msg!=c.Message||c.QuestionPending!=localMessages.Waiting(c)))updates[c.Key]=msg;}
+   var current=Cards;var shown=Card.Sort(current.Values,Settings).Where(c=>c.Host=="local").ToArray();var updates=new Dictionary<string,string>();
+   foreach(var c in shown){var msg=await Task.Run(()=>localMessages.Read(c));if(!c.Live&&msg.Length>0&&(msg!=c.Message||c.QuestionPending!=localMessages.Waiting(c)))updates[c.Key]=msg;}
    // A full refresh may have started while the file reads were in flight.
-   if(Refreshing||!object.ReferenceEquals(current,Cards)||updates.Count==0)return;
-   var next=current.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var p in updates){next[p.Key].Message=p.Value;next[p.Key].MessageKind="最新对话";next[p.Key].MessageUnavailable=false;next[p.Key].QuestionPending=localMessages.Waiting(next[p.Key]);}Cards=next;Changed();
+   if(Refreshing||!object.ReferenceEquals(current,Cards))return;
+   var next=current.ToDictionary(p=>p.Key,p=>p.Value.Copy());bool cleared=ApplyLocalAnswers(next);if(updates.Count==0&&!cleared)return;foreach(var p in updates){next[p.Key].Message=p.Value;next[p.Key].MessageKind="最新对话";next[p.Key].MessageUnavailable=false;next[p.Key].QuestionPending=localMessages.Waiting(next[p.Key]);}Cards=next;Changed();
   }finally{readingLocal=false;}}
   public async Task Refresh(){if(Refreshing)return;Refreshing=true;
    // Work only on detached cards; readers keep the last complete snapshot.
