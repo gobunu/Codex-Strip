@@ -4,6 +4,8 @@ Windows 上的 Codex 线程状态条，适用于横向或竖向副屏。支持�
 
 支持 100%–200% 可保存的界面倍率（默认 150%），以及顶部全屏按钮。按 F11 切换全屏，按 Esc 退出全屏；退出后恢复原来的浮动位置或屏幕停靠。
 
+没有进行中的任务和待处理事项后，看板会在可设置的静息时间结束时切换为资源监控。资源视图显示 CPU、GPU、内存、网速和磁盘读写；点击视图即可返回任务。显示项目与顺序、网卡、速率单位、颜色和背景图片可在设置中调整。
+
 ## 运行
 
 从 [dist/CodexStrip-portable.zip](dist/CodexStrip-portable.zip) 下载便携包并解压，运行 `CodexStrip.exe`。保留同目录的 `CodexStrip.exe.config`。无需安装，需要 Windows .NET Framework 4.8，且 Codex 桌面应用保持运行。
