@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -124,22 +125,40 @@ namespace CodexStrip {
   readonly Dictionary<string,Border> sleepCells=new Dictionary<string,Border>();string sleepTileLayout="";
   DateTime lastRingFrame=DateTime.MinValue;
   readonly ResourceSampler sampler=new ResourceSampler();ResourceSnapshot resources=new ResourceSnapshot();
-  DateTime quietSince=DateTime.MinValue;bool sleeping,sampling,sleepWallpaperActive,sleepPortraitLayout;
+  DateTime quietSince=DateTime.MinValue;bool sleeping,sampling,sleepWallpaperActive,sleepPortraitLayout;int sleepTransition;
   Dictionary<string,Card> manualSleepCards;
   public bool Sleeping {get{return sleeping;}}
   public void StartSleepWatcher(){sleepTicker.Tick+=SleepTick;sleepTicker.Start();ringTicker.Tick+=RingTick;EvaluateSleep();}
-  public void StopSleepWatcher(){sleepTicker.Stop();sleepTicker.Tick-=SleepTick;ringTicker.Stop();ringTicker.Tick-=RingTick;sampler.Dispose();}
+  public void StopSleepWatcher(){sleepTicker.Stop();sleepTicker.Tick-=SleepTick;ringTicker.Stop();ringTicker.Tick-=RingTick;FinishSleepTransition(++sleepTransition);sampler.Dispose();}
   async void SleepTick(object sender,EventArgs e){EvaluateSleep();if(sleeping&&IsVisible&&sleepClock!=null)sleepClock.Text=DateTime.Now.ToString("HH:mm:ss");if(!sleeping||sampling||!IsVisible)return;sampling=true;try{ResourceSnapshot next=DemoMode?DemoResources():await Task.Run(()=>sampler.Sample(Config.SleepAdapterId));if(sleeping&&!closing){resources=next;SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}}catch{}finally{sampling=false;}}
   static ResourceSnapshot DemoResources(){double t=DateTime.Now.Second,phase=DateTime.Now.TimeOfDay.TotalSeconds;return new ResourceSnapshot{Cpu=28+t%9,Gpu=17+t%7,Memory=63.4,Download=(3.8+1.5*Math.Sin(phase*1.2))*1024*1024,Upload=(.7+.3*Math.Sin(phase*.8+1))*1024*1024,DiskRead=(2.1+1.2*Math.Sin(phase*.9))*1024*1024,DiskWrite=(.8+.4*Math.Sin(phase*.6+2))*1024*1024,NetworkName="演示网卡",CpuProcesses=new[]{new ResourcePart("Codex",11),new ResourcePart("浏览器",7),new ResourcePart("系统服务",4)},GpuProcesses=new[]{new ResourcePart("浏览器",9),new ResourcePart("Codex",5),new ResourcePart("桌面窗口",3)},MemoryProcesses=new[]{new ResourcePart("浏览器",17),new ResourcePart("Codex",11),new ResourcePart("桌面窗口",5)}};}
   public void ShowSleepDemo(){resources=DemoResources();SetSleeping(true);}
   public void ShowSleepMonitor(){ClosePanel();manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());if(DemoMode)resources=DemoResources();SetSleeping(true);SleepTick(null,EventArgs.Empty);}
-  public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&sleepLayer.Visibility==Visibility.Collapsed&&taskPage.Visibility==Visibility.Visible;}
+  public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&!sleepLayer.IsHitTestVisible&&taskPage.IsHitTestVisible&&taskPage.Visibility==Visibility.Visible;}
   void RecordSleepInteraction(){if(!sleeping)quietSince=DateTime.UtcNow;}
   public void EvaluateSleep(){if(DemoMode)return;if(manualSleepCards!=null){foreach(var card in Engine.Cards.Values){Card previous;manualSleepCards.TryGetValue(card.Key,out previous);if(SleepPolicy.NewAttention(previous,card)){WakeSleep();return;}}manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());return;}if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping)WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}
   public void WakeSleep(){manualSleepCards=null;if(sleeping)SetSleeping(false);quietSince=DateTime.UtcNow;}
-  void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;if(taskPage!=null)taskPage.Visibility=value?Visibility.Collapsed:Visibility.Visible;if(sleepLayer!=null)sleepLayer.Visibility=value?Visibility.Visible:Visibility.Collapsed;if(value){SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
+  void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;TransitionSleepPage();if(value){SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
+  void FinishSleepTransition(int version){
+   if(version!=sleepTransition||taskPage==null||sleepLayer==null)return;
+   sleepLayer.BeginAnimation(UIElement.OpacityProperty,null);sleepLayer.Opacity=sleeping?1:0;
+   sleepLayer.Visibility=sleeping?Visibility.Visible:Visibility.Collapsed;sleepLayer.IsHitTestVisible=sleeping;
+   taskPage.Visibility=sleeping?Visibility.Collapsed:Visibility.Visible;taskPage.IsHitTestVisible=!sleeping;
+  }
+  void TransitionSleepPage(){
+   int version=++sleepTransition;if(taskPage==null||sleepLayer==null)return;
+   double from=sleepLayer.Visibility==Visibility.Visible?sleepLayer.Opacity:0;
+   // Keep the task page behind the fading overlay, ready for immediate input on wake.
+   taskPage.Visibility=Visibility.Visible;taskPage.IsHitTestVisible=!sleeping;
+   sleepLayer.BeginAnimation(UIElement.OpacityProperty,null);sleepLayer.Opacity=from;
+   sleepLayer.Visibility=Visibility.Visible;sleepLayer.IsHitTestVisible=sleeping;
+   if(!IsLoaded||!SystemParameters.ClientAreaAnimation){FinishSleepTransition(version);return;}
+   var fade=new DoubleAnimation(from,sleeping?1:0,TimeSpan.FromMilliseconds(sleeping?700:140)){EasingFunction=new CubicEase{EasingMode=sleeping?EasingMode.EaseInOut:EasingMode.EaseOut}};
+   fade.Completed+=delegate{FinishSleepTransition(version);};
+   sleepLayer.BeginAnimation(UIElement.OpacityProperty,fade);
+  }
   public void RefreshSleepAppearance(){if(sleepLayer==null)return;BuildSleepBackground();SetRingTargets();SetRateTargets(false);UpdateSleepView();StartRingAnimation();}
-  public void BuildSleepLayer(Grid root,Border dashboard){taskPage=dashboard;sleepLayer=new Grid{Visibility=sleeping?Visibility.Visible:Visibility.Collapsed,ClipToBounds=true,Cursor=Cursors.Hand};root.Children.Add(sleepLayer);sleepLayer.PreviewMouseLeftButtonDown+=(s,e)=>{WakeSleep();e.Handled=true;};BuildSleepBackground();UpdateSleepView();taskPage.Visibility=sleeping?Visibility.Collapsed:Visibility.Visible;}
+  public void BuildSleepLayer(Grid root,Border dashboard){++sleepTransition;if(sleepLayer!=null)sleepLayer.BeginAnimation(UIElement.OpacityProperty,null);taskPage=dashboard;sleepLayer=new Grid{Visibility=sleeping?Visibility.Visible:Visibility.Collapsed,Opacity=sleeping?1:0,IsHitTestVisible=sleeping,ClipToBounds=true,Cursor=Cursors.Hand};root.Children.Add(sleepLayer);sleepLayer.PreviewMouseLeftButtonDown+=(s,e)=>{WakeSleep();e.Handled=true;};BuildSleepBackground();UpdateSleepView();taskPage.Visibility=sleeping?Visibility.Collapsed:Visibility.Visible;taskPage.IsHitTestVisible=!sleeping;}
 
   string SleepInk {get{return sleepWallpaperActive?"#FFFFFF":Design.Ink;}}
   string SleepMuted {get{return sleepWallpaperActive?"#E9EDF4":Design.Muted;}}
