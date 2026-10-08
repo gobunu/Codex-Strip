@@ -11,6 +11,7 @@ namespace CodexStrip {
   bool disposed;
   public TrayHost(StripWindow w){window=w;artwork=System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location);menu=new Forms.ContextMenuStrip();
    menu.Items.Add("显示／隐藏看板",null,delegate{Toggle();});
+   menu.Items.Add("立即进入静息",null,delegate{Show();window.ShowSleepMonitor();});
    menu.Items.Add("账户额度",null,delegate{Show();window.ShowUsage();});
    menu.Items.Add("设置",null,delegate{Show();window.ShowSettings();});
    menu.Items.Add(new Forms.ToolStripSeparator());
