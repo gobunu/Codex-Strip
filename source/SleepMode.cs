@@ -15,8 +15,8 @@ using System.Windows.Threading;
 
 namespace CodexStrip {
  public static class SleepPolicy {
-  // Unloaded historical threads may have no snapshot; they have no running turn.
-  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if((card.Stale&&state!="notLoaded")||card.QuestionPending||card.UnreadResult||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
+  // Missing detail snapshots do not make a known idle or ended thread active.
+  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if(card.QuestionPending||(state=="completed"&&(card.Unread||card.CompletionPending))||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
   public static bool Due(DateTime since,DateTime now,int minutes){return since!=DateTime.MinValue&&(now-since).TotalMinutes>=Math.Max(1,minutes);}
   public static bool NewAttention(Card before,Card after){
    if(after.Stale)return false;
@@ -126,6 +126,7 @@ namespace CodexStrip {
   DateTime lastRingFrame=DateTime.MinValue;
   readonly ResourceSampler sampler=new ResourceSampler();ResourceSnapshot resources=new ResourceSnapshot();
   DateTime quietSince=DateTime.MinValue;bool sleeping,sampling,sleepWallpaperActive,sleepPortraitLayout;int sleepTransition;
+  DateTime sleepStatusWritten=DateTime.MinValue;string sleepStatusSignature="";
   Dictionary<string,Card> manualSleepCards;
   public bool Sleeping {get{return sleeping;}}
   public void StartSleepWatcher(){sleepTicker.Tick+=SleepTick;sleepTicker.Start();ringTicker.Tick+=RingTick;EvaluateSleep();}
@@ -136,7 +137,15 @@ namespace CodexStrip {
   public void ShowSleepMonitor(){ClosePanel();manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());if(DemoMode)resources=DemoResources();SetSleeping(true);SleepTick(null,EventArgs.Empty);}
   public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&!sleepLayer.IsHitTestVisible&&taskPage.IsHitTestVisible&&taskPage.Visibility==Visibility.Visible;}
   void RecordSleepInteraction(){if(!sleeping)quietSince=DateTime.UtcNow;}
-  public void EvaluateSleep(){if(DemoMode)return;if(manualSleepCards!=null){foreach(var card in Engine.Cards.Values){Card previous;manualSleepCards.TryGetValue(card.Key,out previous);if(SleepPolicy.NewAttention(previous,card)){WakeSleep();return;}}manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());return;}if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping)WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}
+  public void EvaluateSleep(){if(DemoMode)return;try{if(manualSleepCards!=null){foreach(var card in Engine.Cards.Values){Card previous;manualSleepCards.TryGetValue(card.Key,out previous);if(SleepPolicy.NewAttention(previous,card)){WakeSleep();return;}}manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());return;}if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping&&!SleepPolicy.Quiet(true,Engine.Cards.Values))WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}finally{WriteSleepStatus();}}
+  void WriteSleepStatus(){try{
+   var all=Engine.Cards.Values.ToArray();int running=all.Count(c=>new[]{"active","reconnecting"}.Contains(c.Status)),questions=all.Count(c=>c.QuestionPending||new[]{"input","approval"}.Contains(c.Status)),unread=all.Count(c=>c.Status=="completed"&&(c.Unread||c.CompletionPending)),other=all.Count(c=>!new[]{"completed","idle","notLoaded","interrupted","active","reconnecting","input","approval"}.Contains(c.Status));
+   string reason=sleeping?(manualSleepCards!=null?"manual_sleep":"sleeping"):!Config.SleepAuto?"disabled":!Engine.Connected?"disconnected":running>0?"running_task":questions>0?"pending_request":unread>0?"unread_result":other>0?"unknown_or_error":"counting_down";
+   string signature=reason+"/"+quietSince.Ticks+"/"+Config.SleepIdleMinutes+"/"+running+"/"+questions+"/"+unread+"/"+other;DateTime now=DateTime.UtcNow;
+   if(signature==sleepStatusSignature&&(now-sleepStatusWritten).TotalSeconds<5)return;
+   Directory.CreateDirectory(Settings.DataDir);File.WriteAllText(Path.Combine(Settings.DataDir,"sleep-state.json"),J.Json(J.Obj("version",1,"observedUtc",now.ToString("o"),"sleeping",sleeping,"autoEnabled",Config.SleepAuto,"idleMinutes",Config.SleepIdleMinutes,"connected",Engine.Connected,"quietSinceUtc",quietSince==DateTime.MinValue?null:quietSince.ToString("o"),"reason",reason,"runningTasks",running,"pendingRequests",questions,"unreadResults",unread,"otherBlockers",other)));
+   sleepStatusSignature=signature;sleepStatusWritten=now;
+  }catch{}}
   public void WakeSleep(){manualSleepCards=null;if(sleeping)SetSleeping(false);quietSince=DateTime.UtcNow;}
   void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;TransitionSleepPage();if(value){SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
   void FinishSleepTransition(int version){
