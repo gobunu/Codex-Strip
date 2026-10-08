@@ -2,6 +2,7 @@ data/
 work/
 /CodexStrip.exe
 /dist/
+/settings-test-data/
 *.log
 *-result.json
 *-test.txt

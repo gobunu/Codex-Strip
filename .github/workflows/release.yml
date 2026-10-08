@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -52,3 +53,20 @@ jobs:
           }
           gh release upload $env:RELEASE_TAG CodexStrip.exe CodexStrip.exe.config dist/CodexStrip-portable.zip dist/SHA256SUMS.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+      - name: Remove superseded publication
+        if: github.ref == 'refs/tags/v0.1.2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view v0.1.1 *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete v0.1.1 --yes
+            if ($LASTEXITCODE -ne 0) { throw 'Old release deletion failed' }
+          }
+          gh api repos/gobunu/Codex-Strip/actions/runs/37753654104 *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh api --method DELETE repos/gobunu/Codex-Strip/actions/runs/37753654104
+            if ($LASTEXITCODE -ne 0) { throw 'Old workflow run deletion failed' }
+          }
+          $global:LASTEXITCODE = 0
