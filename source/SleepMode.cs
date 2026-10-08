@@ -14,7 +14,8 @@ using System.Windows.Threading;
 
 namespace CodexStrip {
  public static class SleepPolicy {
-  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if(card.Stale||card.QuestionPending||card.UnreadResult||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
+  // Unloaded historical threads may have no snapshot; they have no running turn.
+  public static bool Quiet(bool connected,IEnumerable<Card> cards){if(!connected)return false;foreach(var card in cards){string state=card.Status??"";if((card.Stale&&state!="notLoaded")||card.QuestionPending||card.UnreadResult||!new[]{"completed","idle","notLoaded","interrupted"}.Contains(state))return false;}return true;}
   public static bool Due(DateTime since,DateTime now,int minutes){return since!=DateTime.MinValue&&(now-since).TotalMinutes>=Math.Max(1,minutes);}
   public static bool NewAttention(Card before,Card after){
    if(after.Stale)return false;
@@ -133,7 +134,8 @@ namespace CodexStrip {
   public void ShowSleepDemo(){resources=DemoResources();SetSleeping(true);}
   public void ShowSleepMonitor(){ClosePanel();manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());if(DemoMode)resources=DemoResources();SetSleeping(true);SleepTick(null,EventArgs.Empty);}
   public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&sleepLayer.Visibility==Visibility.Collapsed&&taskPage.Visibility==Visibility.Visible;}
-  public void EvaluateSleep(){if(DemoMode)return;if(manualSleepCards!=null){foreach(var card in Engine.Cards.Values){Card previous;manualSleepCards.TryGetValue(card.Key,out previous);if(SleepPolicy.NewAttention(previous,card)){WakeSleep();return;}}manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());return;}if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}if(PanelOpen){quietSince=DateTime.UtcNow;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping)WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}
+  void RecordSleepInteraction(){if(!sleeping)quietSince=DateTime.UtcNow;}
+  public void EvaluateSleep(){if(DemoMode)return;if(manualSleepCards!=null){foreach(var card in Engine.Cards.Values){Card previous;manualSleepCards.TryGetValue(card.Key,out previous);if(SleepPolicy.NewAttention(previous,card)){WakeSleep();return;}}manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());return;}if(!Config.SleepAuto){if(sleeping)WakeSleep();quietSince=DateTime.MinValue;return;}bool quiet=SleepPolicy.Quiet(Engine.Connected,Engine.Cards.Values);if(!quiet){quietSince=DateTime.MinValue;if(sleeping)WakeSleep();return;}if(quietSince==DateTime.MinValue)quietSince=DateTime.UtcNow;if(!sleeping&&SleepPolicy.Due(quietSince,DateTime.UtcNow,Config.SleepIdleMinutes))SetSleeping(true);}
   public void WakeSleep(){manualSleepCards=null;if(sleeping)SetSleeping(false);quietSince=DateTime.UtcNow;}
   void SetSleeping(bool value){if(sleeping==value)return;sleeping=value;if(taskPage!=null)taskPage.Visibility=value?Visibility.Collapsed:Visibility.Visible;if(sleepLayer!=null)sleepLayer.Visibility=value?Visibility.Visible:Visibility.Collapsed;if(value){SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}else{ringTicker.Stop();lastRingFrame=DateTime.MinValue;}}
   public void RefreshSleepAppearance(){if(sleepLayer==null)return;BuildSleepBackground();SetRingTargets();SetRateTargets(false);UpdateSleepView();StartRingAnimation();}

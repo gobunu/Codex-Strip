@@ -53,7 +53,9 @@ namespace CodexStrip {
    Loaded+=async delegate{StartSleepWatcher();if(!DemoMode)InitializeTopmost();if(!DemoMode&&TrayMode)InitializeDocking();if(!DemoMode){Engine.Stream=new DesktopStream();Engine.Stream.Changed=()=>Dispatcher.BeginInvoke(new Action(()=>liveDirty=true));Engine.Stream.Watch(Config.Watched.Select(p=>new Card{Id=p.Key,Host=p.Value}));Engine.Stream.Start();await System.Threading.Tasks.Task.Run(()=>Engine.Stream.DiscoverKnownThreads());liveTick.Start();}if(DemoMode){Demo();Render();}else{tick.Start();clock.Start();await Refresh();}};
    SystemEvents.UserPreferenceChanged+=SystemThemeChanged;
    Closing+=(sender,e)=>{if(TrayMode&&!Exiting){e.Cancel=true;HideToTray();return;}if(Fullscreen)ToggleFullscreen();RememberCurrentThickness();closing=true;StopSleepWatcher();liveTick.Stop();if(Engine.Stream!=null)Engine.Stream.Dispose();tick.Stop();clock.Stop();SystemEvents.UserPreferenceChanged-=SystemThemeChanged;if(usageWindow!=null)usageWindow.Close();if(settingsWindow!=null)settingsWindow.Close();if(!DemoMode){if(WindowState==WindowState.Normal&&!Docked){Config.Left=Left;Config.Top=Top;Config.Width=Width;Config.Height=Height;}Save();}};
-   PreviewKeyDown+=(o,e)=>{if(e.Key==Key.F5&&!DemoMode){var t=Refresh();}if(e.Key==Key.F11){ToggleFullscreen();e.Handled=true;return;}if(e.Key==Key.Escape&&Fullscreen){ToggleFullscreen();e.Handled=true;return;}if(e.Key==Key.Escape&&PanelOpen){ClosePanel();e.Handled=true;return;}if(e.Key==Key.Escape&&WindowState==WindowState.Maximized)WindowState=WindowState.Normal;};
+   PreviewMouseDown+=delegate{RecordSleepInteraction();};
+   PreviewMouseWheel+=delegate{RecordSleepInteraction();};
+   PreviewKeyDown+=(o,e)=>{RecordSleepInteraction();if(e.Key==Key.F5&&!DemoMode){var t=Refresh();}if(e.Key==Key.F11){ToggleFullscreen();e.Handled=true;return;}if(e.Key==Key.Escape&&Fullscreen){ToggleFullscreen();e.Handled=true;return;}if(e.Key==Key.Escape&&PanelOpen){ClosePanel();e.Handled=true;return;}if(e.Key==Key.Escape&&WindowState==WindowState.Maximized)WindowState=WindowState.Normal;};
   }
   public void HideToTray(){if(Fullscreen)ToggleFullscreen();RememberCurrentThickness();ClosePanel();if(usageWindow!=null)usageWindow.Close();if(settingsWindow!=null)settingsWindow.Close();if(WindowState==WindowState.Normal&&!Docked){Config.Left=Left;Config.Top=Top;Config.Width=Width;Config.Height=Height;}Save();Hide();}
   void SystemThemeChanged(object sender,UserPreferenceChangedEventArgs e){if(Config.ThemeMode=="system"&&!closing)Dispatcher.BeginInvoke(new Action(ApplyTheme));}
@@ -108,5 +110,4 @@ namespace CodexStrip {
   public void SnapshotSettingsBottom(string path){if(!(activePanel is SettingsWindow))ShowSettings();ResizePanels();settingsWindow.ScrollBottom();Design.Capture(this,path);}
  }
 }
-
 
