@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -9,9 +10,14 @@ namespace CodexStrip {
  // This WPF adaptation caches a static wallpaper edge, rather than running a
  // full-screen shader on every resource-monitor animation frame.
  public static class GlassBackdrop {
+  sealed class PixelBuffer {
+   public readonly byte[] Bytes;
+   public PixelBuffer(BitmapSource image){var source=new FormatConvertedBitmap(image,PixelFormats.Bgra32,null,0);int stride=image.PixelWidth*4;Bytes=new byte[stride*image.PixelHeight];source.CopyPixels(Bytes,stride,0);}
+  }
+  static readonly ConditionalWeakTable<BitmapSource,PixelBuffer> pixelCache=new ConditionalWeakTable<BitmapSource,PixelBuffer>();
   public static BitmapSource Edge(BitmapSource image,Size scene,Rect panel,double radius,double dim,double density,bool refraction=false,Color? backgroundColor=null){
    density=Math.Max(1,Math.Min(2,density));int width=Math.Max(1,(int)Math.Ceiling(panel.Width*density)),height=Math.Max(1,(int)Math.Ceiling(panel.Height*density));
-   int sw=image.PixelWidth,sh=image.PixelHeight,stride=sw*4;byte[] input=null;if(refraction){var source=new FormatConvertedBitmap(image,PixelFormats.Bgra32,null,0);input=new byte[stride*sh];source.CopyPixels(input,stride,0);}var output=new byte[width*height*4];
+   int sw=image.PixelWidth,sh=image.PixelHeight,stride=sw*4;byte[] input=null;if(refraction)input=(image.IsFrozen?pixelCache.GetValue(image,p=>new PixelBuffer(p)):new PixelBuffer(image)).Bytes;var output=new byte[width*height*4];
    double scale=Math.Max(scene.Width/sw,scene.Height/sh),offsetX=(scene.Width-sw*scale)/2,offsetY=(scene.Height-sh*scale)/2;
    double halfW=panel.Width/2,halfH=panel.Height/2,r=Math.Min(radius,Math.Min(halfW,halfH)),band=Math.Min(refraction?18:6,Math.Min(r,Math.Min(halfW,halfH)*.65)),amount=refraction?Math.Min(32,Math.Min(halfW,halfH)*1.5):0,gradientRadius=Math.Min(r*1.5,Math.Min(halfW,halfH));
    dim=Math.Max(.2,Math.Min(.8,dim));Color background=backgroundColor??Colors.White;double[] baseChannels={background.B,background.G,background.R};
