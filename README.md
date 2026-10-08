@@ -22,16 +22,17 @@ Windows 上的 Codex 线程状态条，适用于横向或竖向副屏。支持�
 
 源码使用系统 .NET Framework 4.8 编译器，不依赖第三方运行库。`source/tests/` 为开发验证程序，部分测试会操作窗口或临时预留屏幕工作区。
 
+构建后运行 `./source/package.ps1` 生成便携包、校验文件和当前版本的发布说明，输出到 `dist/`。EXE 和 `dist/` 不纳入版本控制；推送版本标签后，GitHub Actions 会从源码构建并上传到 Release。
+
 `source/tests/DesktopToolsSmokeTest.cs` 可验证正在运行的 Codex 桌面接口，包括自动发现、任务快照、对话和额度读取。默认只读；传入线程 ID 时会额外验证跳转。
 
 ## 文件
 
 - `source/`：C# 源码、构建脚本和测试源码。
 - `assets/`：应用图标。
-- `CodexStrip.exe`：当前构建。
+- `CodexStrip.exe.config`：运行配置。
 - `使用说明.md`：功能说明与已知限制。
 - `DESIGN.md`：设计记录。
 - `screenshots/`：演示数据截图。
-- `dist/`：便携版 ZIP 和校验信息。
 
 设计参考资料许可证见 `DESIGN-LICENSE.txt`，不代表整个项目以该许可证发布。
