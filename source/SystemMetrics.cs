@@ -29,7 +29,7 @@ namespace CodexStrip {
   string lastAdapter="";long lastReceived,lastSent;DateTime lastNetworkTime;
   PerformanceCounter diskRead,diskWrite;bool diskUnavailable;
   Dictionary<int,long> processPrevious=new Dictionary<int,long>();DateTime lastProcessTime;
-  Dictionary<string,CounterSample> gpuPrevious=new Dictionary<string,CounterSample>();double? lastGpu;ResourcePart[] lastGpuParts=new ResourcePart[0];DateTime lastGpuTime;bool gpuUnavailable;double gpuDivisor=1;
+  Dictionary<string,CounterSample> gpuPrevious=new Dictionary<string,CounterSample>();double? lastGpu;ResourcePart[] lastGpuParts=new ResourcePart[0];DateTime lastGpuTime;bool gpuUnavailable;
 
   public static NetworkInterface[] Adapters(){try{return NetworkInterface.GetAllNetworkInterfaces().Where(n=>n.NetworkInterfaceType!=NetworkInterfaceType.Loopback&&n.NetworkInterfaceType!=NetworkInterfaceType.Tunnel).OrderBy(n=>n.Name).ToArray();}catch{return new NetworkInterface[0];}}
   static bool Gateway(NetworkInterface n){try{return n.GetIPProperties().GatewayAddresses.Count>0;}catch{return false;}}
@@ -57,13 +57,24 @@ namespace CodexStrip {
   }
   static string ProcessName(int pid){try{using(var process=Process.GetProcessById(pid))return process.ProcessName;}catch{return "PID "+pid;}}
   double? ReadGpu(ResourceSnapshot result){result.GpuProcesses=lastGpuParts;if(gpuUnavailable)return null;if((DateTime.UtcNow-lastGpuTime).TotalSeconds<2)return lastGpu;try{
-    var category=new PerformanceCounterCategory("GPU Engine");var all=category.ReadCategory();var values=all["Utilization Percentage"];var next=new Dictionary<string,CounterSample>();var engines=new Dictionary<string,double>();var engineProcesses=new Dictionary<string,Dictionary<int,double>>();double largestInstance=0;
-    foreach(DictionaryEntry item in values){string instance=Convert.ToString(item.Key);var data=item.Value as InstanceData;if(data==null)continue;next[instance]=data.Sample;CounterSample prior;if(!gpuPrevious.TryGetValue(instance,out prior))continue;int marker=instance.IndexOf("_luid_",StringComparison.OrdinalIgnoreCase);if(marker<0)continue;double value;try{value=CounterSample.Calculate(prior,data.Sample);}catch{continue;}if(double.IsNaN(value)||double.IsInfinity(value)||value<0)continue;largestInstance=Math.Max(largestInstance,value);string engine=instance.Substring(marker+1);double sum;engines.TryGetValue(engine,out sum);engines[engine]=sum+value;int start=instance.IndexOf("pid_",StringComparison.OrdinalIgnoreCase);if(start>=0){start+=4;int end=instance.IndexOf('_',start);int pid;if(end>start&&int.TryParse(instance.Substring(start,end-start),out pid)){Dictionary<int,double> processes;if(!engineProcesses.TryGetValue(engine,out processes)){processes=new Dictionary<int,double>();engineProcesses[engine]=processes;}double current;processes.TryGetValue(pid,out current);processes[pid]=current+value;}}}
-    // Some WDDM drivers return GPU Engine values scaled by 100 or 1000.
-    // Keep the detected scale for subsequent samples in this run.
-    if(largestInstance>1000)gpuDivisor=1000;else if(largestInstance>100&&gpuDivisor<100)gpuDivisor=100;
-    gpuPrevious=next;string busiest=engines.OrderByDescending(p=>p.Value).Select(p=>p.Key).FirstOrDefault();lastGpu=busiest!=null?(double?)Math.Max(0,Math.Min(100,engines[busiest]/gpuDivisor)):null;lastGpuParts=new ResourcePart[0];Dictionary<int,double> byPid;if(busiest!=null&&engineProcesses.TryGetValue(busiest,out byPid)){var names=new Dictionary<string,double>(StringComparer.OrdinalIgnoreCase);foreach(var p in byPid.OrderByDescending(p=>p.Value).Take(12)){string name=ProcessName(p.Key);double old;names.TryGetValue(name,out old);names[name]=old+p.Value/gpuDivisor;}lastGpuParts=TopParts(names,lastGpu);}result.GpuProcesses=lastGpuParts;lastGpuTime=DateTime.UtcNow;return lastGpu;
+    var values=new PerformanceCounterCategory("GPU Engine").ReadCategory()["Utilization Percentage"];var next=new Dictionary<string,CounterSample>();
+    foreach(DictionaryEntry item in values){var data=item.Value as InstanceData;if(data!=null)next[Convert.ToString(item.Key)]=data.Sample;}
+    UpdateGpu(next);result.GpuProcesses=lastGpuParts;lastGpuTime=DateTime.UtcNow;return lastGpu;
    }catch{gpuUnavailable=true;return null;}}
+  void UpdateGpu(Dictionary<string,CounterSample> next){
+   var engines=new Dictionary<string,double>();var engineProcesses=new Dictionary<string,Dictionary<int,double>>();
+   foreach(var item in next){string instance=item.Key;CounterSample prior;if(!gpuPrevious.TryGetValue(instance,out prior))continue;var sample=item.Value;
+    // A restarted counter is a new baseline, not a utilization reading.
+    if(sample.CounterType!=prior.CounterType||sample.RawValue<prior.RawValue||sample.TimeStamp100nSec<=prior.TimeStamp100nSec)continue;
+    int marker=instance.IndexOf("_luid_",StringComparison.OrdinalIgnoreCase);if(marker<0)continue;double value;try{value=CounterSample.Calculate(prior,sample);}catch{continue;}
+    if(double.IsNaN(value)||double.IsInfinity(value)||value<0)continue;
+    // Windows already returns a percentage. Bound this sample without rescaling later ones.
+    value=Math.Min(100,value);string engine=instance.Substring(marker+1);double sum;engines.TryGetValue(engine,out sum);engines[engine]=sum+value;
+    int start=instance.IndexOf("pid_",StringComparison.OrdinalIgnoreCase);if(start>=0){start+=4;int end=instance.IndexOf('_',start);int pid;if(end>start&&int.TryParse(instance.Substring(start,end-start),out pid)){Dictionary<int,double> processes;if(!engineProcesses.TryGetValue(engine,out processes)){processes=new Dictionary<int,double>();engineProcesses[engine]=processes;}double current;processes.TryGetValue(pid,out current);processes[pid]=current+value;}}
+   }
+   gpuPrevious=next;string busiest=engines.OrderByDescending(p=>p.Value).Select(p=>p.Key).FirstOrDefault();lastGpu=busiest!=null?(double?)Math.Max(0,Math.Min(100,engines[busiest])):null;lastGpuParts=new ResourcePart[0];Dictionary<int,double> byPid;
+   if(busiest!=null&&engineProcesses.TryGetValue(busiest,out byPid)){var names=new Dictionary<string,double>(StringComparer.OrdinalIgnoreCase);foreach(var p in byPid.OrderByDescending(p=>p.Value).Take(12)){string name=ProcessName(p.Key);double old;names.TryGetValue(name,out old);names[name]=old+p.Value;}lastGpuParts=TopParts(names,lastGpu);}
+  }
   public void Dispose(){if(diskRead!=null)diskRead.Dispose();if(diskWrite!=null)diskWrite.Dispose();}
  }
 }
