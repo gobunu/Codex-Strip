@@ -65,6 +65,13 @@ namespace CodexStrip {
    var pixels=new byte[edge.PixelWidth*edge.PixelHeight*4];edge.CopyPixels(pixels,edge.PixelWidth*4,0);
    if(!edge.IsFrozen||pixels[((40*edge.PixelWidth)+90)*4+3]!=0)throw new Exception("glass refraction affected the clear center");
    if(!Enumerable.Range(0,pixels.Length/4).Any(i=>pixels[i*4+3]>0))throw new Exception("glass edge is empty");
+   var canvas=Color.FromRgb(245,245,247);
+   var transparent=BitmapSource.Create(1,1,96,96,PixelFormats.Bgra32,null,new byte[]{180,120,60,0},4);
+   var opaqueCanvas=BitmapSource.Create(1,1,96,96,PixelFormats.Bgra32,null,new byte[]{canvas.B,canvas.G,canvas.R,255},4);
+   var transparentEdge=GlassBackdrop.Edge(transparent,new Size(200,100),new Rect(10,10,180,80),16,.4,1,true,canvas);
+   var canvasEdge=GlassBackdrop.Edge(opaqueCanvas,new Size(200,100),new Rect(10,10,180,80),16,.4,1,true,canvas);
+   var transparentPixels=new byte[pixels.Length];var canvasPixels=new byte[pixels.Length];transparentEdge.CopyPixels(transparentPixels,transparentEdge.PixelWidth*4,0);canvasEdge.CopyPixels(canvasPixels,canvasEdge.PixelWidth*4,0);
+   if(!transparentPixels.SequenceEqual(canvasPixels))throw new Exception("transparent refraction did not composite over the canvas");
   }
   static void TestManualSleep(){
    var running=new Card{Status="active",TurnId="turn-1"};var update=running.Copy();update.Message="progress";
@@ -80,6 +87,15 @@ namespace CodexStrip {
     string cached=Settings.ImportWallpaper(source);File.Delete(source);
     if(!File.Exists(cached)||!File.ReadAllBytes(cached).SequenceEqual(bytes))throw new Exception("wallpaper copy did not survive deleting original");
     var settings=new Settings{SleepWallpaperPath=cached};settings.Save();var loaded=Settings.Load();if(loaded.SleepWallpaperPath!=cached||loaded.CacheWallpaper())throw new Exception("managed wallpaper path did not survive restart");
+    if(Path.IsPathRooted(J.Str(J.Parse(File.ReadAllText(Path.Combine(Settings.DataDir,"settings.json"))),"sleepWallpaperPath")))throw new Exception("managed wallpaper was stored as an absolute path");
+    string previousData=Settings.DataDir;Settings.DataDir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"settings-test-data","wallpaper-relocated");Directory.CreateDirectory(Settings.DataDir);
+    foreach(string file in Directory.GetFiles(previousData,"*",SearchOption.AllDirectories)){string target=Path.Combine(Settings.DataDir,file.Substring(previousData.Length+1));Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(file,target,true);}
+    string relocated=Path.Combine(Settings.DataDir,cached.Substring(previousData.Length+1));
+    if(Settings.Load().SleepWallpaperPath!=relocated)throw new Exception("relative wallpaper did not relocate with data");
+    File.WriteAllText(Path.Combine(Settings.DataDir,"settings.json"),J.Json(J.Obj("sleepWallpaperPath",cached)));
+    if(Settings.Load().SleepWallpaperPath!=relocated)throw new Exception("legacy absolute wallpaper did not resolve in current data");
+    var legacy=new Settings{SleepWallpaperPath=cached};if(!legacy.CacheWallpaper()||legacy.SleepWallpaperPath!=relocated)throw new Exception("legacy cache did not prefer current data");
+    if(Settings.ResolveWallpaperPath(".."+Path.DirectorySeparatorChar+"outside.png")!="")throw new Exception("relative wallpaper escaped data directory");
    }finally{Settings.DataDir=original;}
   }
   static void TestAsyncReply(){

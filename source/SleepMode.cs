@@ -149,7 +149,8 @@ namespace CodexStrip {
   Border GlassSurface(UIElement content,double radius){
    var shell=new Border{CornerRadius=new CornerRadius(radius)};var layers=new Grid();shell.Child=layers;
    var glass=new Grid();layers.Children.Add(glass);
-   var backdropBrush=new VisualBrush(wallpaperScene){ViewboxUnits=BrushMappingMode.Absolute,Stretch=Stretch.Fill,AutoLayoutContent=false};
+   var sceneVisual=wallpaperScene;var bitmap=sleepWallpaperBitmap;
+   var backdropBrush=new VisualBrush(sceneVisual){ViewboxUnits=BrushMappingMode.Absolute,Stretch=Stretch.Fill,AutoLayoutContent=false};
    // Overscan before blur so the clipped edge never blends against transparent black.
    var backdrop=new Border{Background=backdropBrush,Margin=new Thickness(-3),Effect=Config.SleepGlassRefraction?new BlurEffect{Radius=1.8,RenderingBias=RenderingBias.Quality}:null,CacheMode=new BitmapCache()};glass.Children.Add(backdrop);
    var edge=new Image{Stretch=Stretch.Fill,IsHitTestVisible=false};glass.Children.Add(edge);
@@ -163,8 +164,9 @@ namespace CodexStrip {
    layers.Children.Add(new Border{CornerRadius=new CornerRadius(Math.Max(0,radius-1.5)),BorderBrush=new SolidColorBrush(Color.FromArgb(25,255,255,255)),BorderThickness=new Thickness(.5),Margin=new Thickness(1.5),IsHitTestVisible=false});
    layers.Children.Add(content);
    Rect last=Rect.Empty;Size lastScene=Size.Empty;
-   Action align=()=>{double width=shell.ActualWidth,height=shell.ActualHeight;if(width<=0||height<=0)return;Point origin=shell.TranslatePoint(new Point(0,0),wallpaperScene);var bounds=new Rect(origin.X,origin.Y,width,height);var scene=new Size(wallpaperScene.ActualWidth,wallpaperScene.ActualHeight);backdropBrush.Viewbox=new Rect(origin.X-3,origin.Y-3,width+6,height+6);glass.Clip=new RectangleGeometry(new Rect(0,0,width,height),radius,radius);if(bounds!=last||scene!=lastScene){last=bounds;lastScene=scene;if(sleepWallpaperBitmap!=null&&scene.Width>0&&scene.Height>0)edge.Source=GlassBackdrop.Edge(sleepWallpaperBitmap,scene,bounds,radius,Config.SleepDim,Config.UiScale,Config.SleepGlassRefraction);}};
-   shell.Loaded+=delegate{align();};shell.SizeChanged+=delegate{align();};return shell;
+   Action align=()=>{double width=shell.ActualWidth,height=shell.ActualHeight;if(!shell.IsLoaded||!sceneVisual.IsLoaded||width<=0||height<=0)return;Point origin=shell.TranslatePoint(new Point(0,0),sceneVisual);var bounds=new Rect(origin.X,origin.Y,width,height);var scene=new Size(sceneVisual.ActualWidth,sceneVisual.ActualHeight);if(bounds==last&&scene==lastScene)return;last=bounds;lastScene=scene;backdropBrush.Viewbox=new Rect(origin.X-3,origin.Y-3,width+6,height+6);glass.Clip=new RectangleGeometry(new Rect(0,0,width,height),radius,radius);if(bitmap!=null&&scene.Width>0&&scene.Height>0)edge.Source=GlassBackdrop.Edge(bitmap,scene,bounds,radius,Config.SleepDim,Config.UiScale,Config.SleepGlassRefraction,(Color)ColorConverter.ConvertFromString(Design.Canvas));};
+   SizeChangedEventHandler sceneChanged=delegate{align();};
+   shell.Loaded+=delegate{sceneVisual.SizeChanged+=sceneChanged;align();};shell.Unloaded+=delegate{sceneVisual.SizeChanged-=sceneChanged;};shell.SizeChanged+=delegate{align();};shell.LayoutUpdated+=delegate{align();};return shell;
   }
 
   void BuildSleepBackground(){

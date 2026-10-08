@@ -9,12 +9,12 @@ namespace CodexStrip {
  // This WPF adaptation caches a static wallpaper edge, rather than running a
  // full-screen shader on every resource-monitor animation frame.
  public static class GlassBackdrop {
-  public static BitmapSource Edge(BitmapSource image,Size scene,Rect panel,double radius,double dim,double density,bool refraction=false){
+  public static BitmapSource Edge(BitmapSource image,Size scene,Rect panel,double radius,double dim,double density,bool refraction=false,Color? backgroundColor=null){
    density=Math.Max(1,Math.Min(2,density));int width=Math.Max(1,(int)Math.Ceiling(panel.Width*density)),height=Math.Max(1,(int)Math.Ceiling(panel.Height*density));
    int sw=image.PixelWidth,sh=image.PixelHeight,stride=sw*4;byte[] input=null;if(refraction){var source=new FormatConvertedBitmap(image,PixelFormats.Bgra32,null,0);input=new byte[stride*sh];source.CopyPixels(input,stride,0);}var output=new byte[width*height*4];
    double scale=Math.Max(scene.Width/sw,scene.Height/sh),offsetX=(scene.Width-sw*scale)/2,offsetY=(scene.Height-sh*scale)/2;
    double halfW=panel.Width/2,halfH=panel.Height/2,r=Math.Min(radius,Math.Min(halfW,halfH)),band=Math.Min(refraction?18:6,Math.Min(r,Math.Min(halfW,halfH)*.65)),amount=refraction?Math.Min(32,Math.Min(halfW,halfH)*1.5):0,gradientRadius=Math.Min(r*1.5,Math.Min(halfW,halfH));
-   dim=Math.Max(.2,Math.Min(.8,dim));
+   dim=Math.Max(.2,Math.Min(.8,dim));Color background=backgroundColor??Colors.White;double[] baseChannels={background.B,background.G,background.R};
    for(int y=0;y<height;y++)for(int x=0;x<width;x++){
     double px=(x+.5)/density,py=(y+.5)/density,cx=px-halfW,cy=py-halfH;
     if(Math.Min(Math.Min(px,panel.Width-px),Math.Min(py,panel.Height-py))>r+band)continue;
@@ -32,8 +32,11 @@ namespace CodexStrip {
     int right=Math.Min(sw-1,ix+1),bottom=Math.Min(sh-1,iy+1),a=iy*stride+ix*4,b=iy*stride+right*4,c=bottom*stride+ix*4,d=bottom*stride+right*4,at=(y*width+x)*4;
     // Preserve the lens displacement through most of the band; blend only its
     // inner seam, where displacement already approaches zero.
+    double opacity=((input[a+3]*(1-fx)+input[b+3]*fx)*(1-fy)+(input[c+3]*(1-fx)+input[d+3]*fx)*fy)/255;
     for(int channel=0;channel<3;channel++){
-     double value=(input[a+channel]*(1-fx)+input[b+channel]*fx)*(1-fy)+(input[c+channel]*(1-fx)+input[d+channel]*fx)*fy;
+     // Interpolate premultiplied samples, then composite over the scene's canvas.
+     double value=((input[a+channel]*input[a+3]*(1-fx)+input[b+channel]*input[b+3]*fx)*(1-fy)+(input[c+channel]*input[c+3]*(1-fx)+input[d+channel]*input[d+3]*fx)*fy)/255;
+     value+=baseChannels[channel]*(1-opacity);
      double shade=channel==0?20:channel==1?10:7;value=value*(1-dim)+shade*dim;value=value*(1-shine)+255*shine;output[at+channel]=(byte)Math.Round(value*alpha);
     }
     output[at+3]=(byte)Math.Round(255*alpha);
