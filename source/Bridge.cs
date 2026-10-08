@@ -49,7 +49,8 @@ namespace CodexStrip {
    if(tool!="list_threads"&&tool!="wait_threads"&&tool!="read_thread"&&tool!="navigate_to_codex_page"&&tool!="get_usage_limits")throw new InvalidOperationException("Unsupported operation");
    if(PipeName==null)await Discover();
    if(ContextId==null)throw new IOException("未找到本地任务上下文，请在 Codex 中打开一个已有本地任务后重试。");
-   object result;try {result=await Rpc(PipeName,"tools/call",J.Obj("namespace","codex_app","tool",tool,"arguments",args,"threadId",ContextId,"turnId","mcp-turn-monitor-probe","callId","strip-"+Guid.NewGuid().ToString()),timeout);}catch(Exception e){throw new IOException(tool+": "+e.Message,e);}
+   // Desktop app tools require the originating surface for reads and navigation.
+   object result;try {result=await Rpc(PipeName,"tools/call",J.Obj("namespace","codex_app","tool",tool,"arguments",args,"threadId",ContextId,"turnId","mcp-turn-monitor-probe","callId","strip-"+Guid.NewGuid().ToString(),"callerSource","codex"),timeout);}catch(Exception e){throw new IOException(tool+": "+e.Message,e);}
    var content=J.Arr(J.Get(result,"contentItems"));
    if(!object.Equals(J.Get(result,"success"),true))throw new IOException(string.Join(" ",content.Select(c=>J.Str(c,"text"))));
    foreach(var c in content){string text=J.Str(c,"text");if(text.Length>0){try{return J.Parse(text);}catch{return J.Obj("text",text);}}}
