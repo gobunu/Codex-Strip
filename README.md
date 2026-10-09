@@ -24,7 +24,7 @@ Windows 上的 Codex 线程状态条，适用于横向或竖向副屏。支持�
 
 构建后运行 `./source/package.ps1` 生成便携包、校验文件和当前版本的发布说明，输出到 `dist/`。EXE 和 `dist/` 不纳入版本控制；推送版本标签后，GitHub Actions 会从源码构建并上传到 Release。
 
-`source/tests/DesktopToolsSmokeTest.cs` 可验证正在运行的 Codex 桌面接口，包括自动发现、任务快照、对话和额度读取。默认只读；传入线程 ID 时会额外验证跳转。
+`source/tests/DesktopToolsSmokeTest.cs` 可验证正在运行的 Codex 桌面接口，包括自动发现、任务快照、对话和额度读取。默认只读；传入线程 ID 和可选的 hostId 时会额外验证跳转、窗口激活及完成提醒。`source/tests/ThreadNavigationTest.cs` 覆盖本地、Dots 云端和 SSH 线程的路由、链接编码及失败处理。
 
 ## 文件
 

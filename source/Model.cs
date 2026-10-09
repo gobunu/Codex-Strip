@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
 
 namespace CodexStrip {
@@ -85,6 +86,22 @@ namespace CodexStrip {
    if(Message.Length>4000)Message=Message.Substring(0,4000)+"…";DetailFetched=J.Now;
   }
  }
+ public static class ThreadNavigation {
+  public static bool UsesDesktopLink(Card card){return card!=null&&!string.IsNullOrEmpty(card.Host)&&card.Host!="local";}
+  public static string DesktopLink(Card card){
+   Guid id;
+   if(card==null||!Guid.TryParseExact(card.Id,"D",out id)||string.IsNullOrWhiteSpace(card.Host)||card.Host.Any(char.IsControl))throw new ArgumentException("线程链接信息不完整。");
+   return "codex://threads/"+id.ToString("D")+"?hostId="+Uri.EscapeDataString(card.Host);
+  }
+  static void Launch(string link){using(var process=Process.Start(new ProcessStartInfo(link){UseShellExecute=true})){} }
+  public static async Task Open(Card card,Func<string,object,int,Task<object>> call,Action<string> launch=null){
+   if(card==null)throw new ArgumentNullException("card");
+   // The desktop tool has no hostId argument. Its native links preserve the
+   // cloud/SSH host instead of trying to restore the thread on the local host.
+   if(UsesDesktopLink(card)){(launch??Launch)(DesktopLink(card));return;}
+   await call("navigate_to_codex_page",J.Obj("threadId",card.Id),12000);
+  }
+ }
  public sealed class Credit {public string Title;public double Expires;}
  public sealed class Usage {
   public double? WeeklyRemaining;public double ResetsAt,Updated;public Credit[] Credits=new Credit[0];public int? Count;public string Error="";
@@ -150,7 +167,11 @@ namespace CodexStrip {
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
   }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);if(Stream!=null)Stream.Watch(Cards.Values);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
   public async Task RefreshUsage(){if(refreshingUsage)return;refreshingUsage=true;try{Usage.Update(await Call("get_usage_limits",J.Obj(),15000));}catch{Usage.Error="额度暂不可读取";}finally{refreshingUsage=false;Changed();}}
-  public async Task Open(Card card){var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await Call("navigate_to_codex_page",J.Obj("threadId",card.Id));if(!activated&&!CodexForeground.Activate(window))throw new IOException("已切换线程，但 Windows 未允许激活 Codex 窗口。");Settings.Clicks[card.Key]=J.Now;Settings.PendingCompletions.Remove(card.Key);Card shown;if(Cards.TryGetValue(card.Key,out shown))shown.CompletionPending=false;Settings.Save();Changed();}
+  public async Task Open(Card card){var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(card,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException("已请求切换线程，但 Windows 未允许激活 Codex 窗口。");Settings.Clicks[card.Key]=J.Now;
+   // Shell acceptance cannot confirm that a hosted conversation loaded. Its
+   // desktop read receipt will clear completion markers during the next poll.
+   if(!ThreadNavigation.UsesDesktopLink(card)){Settings.PendingCompletions.Remove(card.Key);Card shown;if(Cards.TryGetValue(card.Key,out shown))shown.CompletionPending=false;}
+   Settings.Save();Changed();}
   static object Target(Card c){return c.Cursor.Length>0?J.Obj("threadId",c.Id,"hostId",c.Host,"afterCursor",c.Cursor):J.Obj("threadId",c.Id,"hostId",c.Host);}
  }
 }

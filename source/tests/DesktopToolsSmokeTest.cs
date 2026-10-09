@@ -22,7 +22,23 @@ class DesktopToolsSmokeTest {
   Console.WriteLine("ThreadRead=passed; DetailKeys="+string.Join(",",((System.Collections.Generic.Dictionary<string,object>)detail).Keys));
   var usage=new Usage();usage.Update(bridge.Call("get_usage_limits",J.Obj()).GetAwaiter().GetResult());
   Console.WriteLine("Usage=passed; WeeklyAvailable="+usage.WeeklyRemaining.HasValue);
-  if(args.Length>0){var nav=bridge.Call("navigate_to_codex_page",J.Obj("threadId",args[0])).GetAwaiter().GetResult();Console.WriteLine("Navigation="+J.Json(nav));}
+  if(args.Length>0){
+   string originalData=Settings.DataDir;
+   try{
+    Settings.DataDir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"navigation-test-data");
+    var card=new Card{Id=args[0],Host=args.Length>1?args[1]:"local",Status="completed",TurnId="sample-turn",CompletionPending=true};
+    var settings=new Settings();settings.PendingCompletions[card.Key]=card.TurnId;
+    var engine=new MonitorEngine(settings,(tool,arguments,timeout)=>bridge.Call(tool,arguments,timeout));engine.Cards[card.Key]=card;
+    engine.Open(card).GetAwaiter().GetResult();
+    if(!settings.Clicks.ContainsKey(card.Key))throw new Exception("Navigation did not record the click");
+    if(ThreadNavigation.UsesDesktopLink(card)){
+     if(!settings.PendingCompletions.ContainsKey(card.Key)||!card.CompletionPending)throw new Exception("Hosted shell launch prematurely acknowledged completion");
+     var read=card.Copy();read.SetUnread(false,J.Now);MonitorEngine.ReconcileCompletion(settings,card,read);
+     if(settings.PendingCompletions.ContainsKey(card.Key)||read.UnreadResult)throw new Exception("Desktop read receipt did not acknowledge completion");
+    }else if(settings.PendingCompletions.ContainsKey(card.Key)||card.CompletionPending)throw new Exception("Local navigation did not acknowledge completion");
+    Console.WriteLine("NavigationRequest=accepted; Host="+card.Host+"; ForegroundActivation=passed; CompletionAcknowledgement=passed");
+   }finally{Settings.DataDir=originalData;}
+  }
   Console.WriteLine("AllPassed=true");return 0;
  }catch(Exception ex){Console.Error.WriteLine(ex.GetType().Name+": "+ex.Message);return 1;} }
 }
