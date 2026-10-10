@@ -7,12 +7,35 @@ class ThreadNavigationTest {
  static void Require(bool value,string message){if(!value)throw new Exception(message);}
  static int Main(){try{
   const string id="00000000-0000-7000-8000-000000000001";
+  const string childId="00000000-0000-7000-8000-000000000002",middleId="00000000-0000-7000-8000-000000000003";
+  var main=new Card{Id=id,Host="remote-ssh-discovered:example-host"};
+  var middle=new Card{Id=middleId,Host=main.Host,Ephemeral=true,ParentId=id};
+  var child=StreamState.Project(J.Obj("ephemeral",true,"parentThreadId",middleId),main.Host,childId);
+  Require(ThreadNavigation.Resolve(child,new[]{main,middle,child})==main,"nested temporary thread did not reach main");
+  child=StreamState.Project(J.Obj("ephemeral",true,"source",J.Obj("subAgent",J.Obj("thread_spawn",J.Obj("parent_thread_id",id)))),main.Host,childId);
+  Require(ThreadNavigation.Resolve(child,new[]{main,child})==main,"source parent lost");
+  child=StreamState.Project(J.Obj("sideConversation",true,"sideConversationParentNavigationPath","/local/"+id+"?hostId=remote-ssh-discovered%3Aexample-host"),"local",childId);
+  Require(ThreadNavigation.Resolve(child,new[]{main,child})==main,"side conversation lost parent host");
+  child=new Card{Id=childId,Host=main.Host,Ephemeral=true};
+  main.ChildMetadata(new[]{J.Obj("type","subAgentActivity","agentThreadId",childId)});
+  Require(ThreadNavigation.Resolve(child,new[]{main,child})==main,"parent activity did not resolve ended child");
+  var retained=MonitorEngine.PreferFresh(child,new Card{Id=childId,Host=main.Host});
+  Require(retained.Ephemeral,"temporary metadata lost on refresh");
+  Require(ThreadNavigation.Resolve(main,new[]{main})==main,"normal navigation changed");
+  foreach(var broken in new[]{new Card{Id=childId,Host=main.Host,Ephemeral=true},new Card{Id=childId,Host=main.Host,ParentId=childId}}){
+   bool rejected=false;try{ThreadNavigation.Resolve(broken,new[]{broken});}catch(System.IO.IOException){rejected=true;}
+   Require(rejected,"orphan or cycle attempted restore");
+  }
   int calls=0,launches=0;string link=null;
   Func<string,object,int,Task<object>> call=(tool,args,timeout)=>{
    calls++;Require(tool=="navigate_to_codex_page"&&J.Str(args,"threadId")==id,"local navigation request changed");
    return Task.FromResult<object>(J.Obj());
   };
   Action<string> launch=value=>{launches++;link=value;};
+  var redirected=ThreadNavigation.Resolve(child,new[]{main,child});
+  ThreadNavigation.Open(redirected,call,launch).GetAwaiter().GetResult();
+  Require(link==ThreadNavigation.DesktopLink(main),"temporary navigation launched child instead of main");
+  launches=0;link=null;
   ThreadNavigation.Open(new Card{Host="local",Id=id},call,launch).GetAwaiter().GetResult();
   Require(calls==1&&launches==0,"local thread did not use desktop tool");
   foreach(string host in new[]{"durable","remote-ssh-discovered:example-host","remote-ssh-discovered:example host&view=other#fragment"}){

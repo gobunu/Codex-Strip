@@ -59,6 +59,21 @@ namespace CodexStrip {
   public void Save(){Directory.CreateDirectory(DataDir);var path=Path.Combine(DataDir,"settings.json");var tmp=path+".tmp";File.WriteAllText(tmp,J.Json(J.Obj("floatingRects",FloatingRects,"thicknesses",Thicknesses,"monitorScales",MonitorScales,"pendingCompletions",PendingCompletions,"theme",ThemeMode,"uiScale",DefaultUiScale,"count",Count,"topmost",Topmost,"topmostMode",TopmostMode,"reserveWorkArea",ReserveWorkArea,"dockEdge",DockEdge,"dockMonitor",DockMonitor,"dockHorizontalSize",DockHorizontalSize,"dockVerticalSize",DockVerticalSize,"host",Host,"width",Width,"height",Height,"left",Left,"top",Top,"clicks",Clicks,"watched",Watched,"sleepAuto",SleepAuto,"sleepRingCharts",SleepRingCharts,"sleepSmoothRings",SleepSmoothRings,"sleepGlassRefraction",SleepGlassRefraction,"sleepIdleMinutes",SleepIdleMinutes,"sleepWidgets",SleepWidgets.ToArray(),"sleepWallpaperPath",SavedWallpaperPath(),"sleepAdapterId",SleepAdapterId,"sleepSpeedUnit",SleepSpeedUnit,"sleepAccent",SleepAccent,"sleepDim",SleepDim)));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
  }
  public sealed class Card {
+  public bool Ephemeral; public string ParentId="",ParentHost=""; public string[] ChildIds=new string[0];
+  public void NavigationMetadata(object state){
+   if(object.Equals(J.Get(state,"ephemeral"),true)||object.Equals(J.Get(state,"sideConversation"),true))Ephemeral=true;
+   string parent=J.Str(state,"parentThreadId");if(parent.Length==0)parent=J.Str(J.Get(J.Get(J.Get(state,"source"),"subAgent"),"thread_spawn"),"parent_thread_id");
+   if(parent.Length>0){ParentId=parent;ParentHost=Host;}
+   string path=J.Str(state,"sideConversationParentNavigationPath");
+   if(path.Length>0){Uri route;if(Uri.TryCreate("https://codex.invalid"+path,UriKind.Absolute,out route)&&route.Host=="codex.invalid"){
+    var parts=route.AbsolutePath.Split('/');Guid id;if(parts.Length==3&&parts[1]=="local"&&Guid.TryParseExact(parts[2],"D",out id)){ParentId=id.ToString("D");ParentHost=Host;foreach(string part in route.Query.TrimStart('?').Split('&')){var pair=part.Split(new[]{'='},2);if(pair.Length==2&&pair[0]=="hostId")ParentHost=Uri.UnescapeDataString(pair[1]);}}
+   }}
+  }
+  public void ChildMetadata(IEnumerable<object> items){ChildIds=ChildIds.Concat(items.SelectMany(item=>{
+   string type=J.Str(item,"type");if(type=="subAgentActivity")return new[]{J.Str(item,"agentThreadId")};
+   if(type=="collabAgentToolCall"&&J.Str(item,"tool")=="spawnAgent")return J.Arr(J.Get(item,"receiverThreadIds")).Select(Convert.ToString);
+   return new string[0];
+  })).Where(id=>id.Length>0).Distinct().ToArray();}
   public string Id,Host,Title,Status="unknown",Message="",MessageKind="",TurnId="",LastError="",Cursor="";
   public double Interaction,Started,LastSeen,DetailFetched,UnreadUpdated; public bool Stale,QuestionPending,MessageUnavailable,Live,Unread,UnreadKnown,CompletionPending;
   public bool UnreadResult {get{return Status=="completed"&&(Unread||CompletionPending)&&!Stale&&!QuestionPending;}}
@@ -71,6 +86,7 @@ namespace CodexStrip {
   public static Card[] Sort(IEnumerable<Card> cards,Settings s){return cards.Where(c=>s.Host=="all"||c.Host==s.Host).OrderByDescending(c=>Rank(c,s)).ThenBy(c=>c.Key,StringComparer.Ordinal).Take(s.Count).ToArray();}
   public void Snapshot(object poll){
    if(J.Get(poll,"thread")==null)return;
+   NavigationMetadata(J.Get(poll,"thread"));
    string cursor=J.Str(poll,"cursor");if(cursor.Length>0)Cursor=cursor;
    var state=J.Get(J.Get(poll,"thread"),"status");var flags=J.Arr(J.Get(state,"activeFlags")).Select(Convert.ToString).ToArray();Status=J.Str(state,"type");
    if(flags.Contains("waitingOnApproval"))Status="approval";else if(flags.Contains("waitingOnUserInput"))Status="input";else if(flags.Contains("reconnecting"))Status="reconnecting";
@@ -78,7 +94,7 @@ namespace CodexStrip {
    var msg=J.Get(poll,"latestAssistantMessage");string text=msg as string;if(text==null)text=J.Str(msg,"text");if(!string.IsNullOrWhiteSpace(text)){Message=text;MessageKind="进展";}
    LastSeen=J.Now;Stale=false;
   }
-  public void Detail(object result){var turns=J.Arr(J.Get(result,"turns"));if(turns.Length==0){MessageUnavailable=true;DetailFetched=J.Now;return;}var turn=turns[0];Snapshot(J.Obj("thread",J.Get(result,"thread"),"latestTurn",turn));double started=J.Num(turn,"startedAt");if(started>0){Interaction=Math.Max(Interaction,started);Started=started;}
+  public void Detail(object result){NavigationMetadata(J.Get(result,"thread"));var turns=J.Arr(J.Get(result,"turns"));ChildMetadata(turns.SelectMany(t=>J.Arr(J.Get(t,"items"))));if(turns.Length==0){MessageUnavailable=true;DetailFetched=J.Now;return;}var turn=turns[0];Snapshot(J.Obj("thread",J.Get(result,"thread"),"latestTurn",turn));double started=J.Num(turn,"startedAt");if(started>0){Interaction=Math.Max(Interaction,started);Started=started;}
    // User message IDs in current desktop builds are UUIDv7. Their embedded time
    // lets steering messages count as interaction; other formats use turn start.
    foreach(var item in J.Arr(J.Get(turn,"items"))){if(J.Str(item,"type")!="userMessage")continue;string id=J.Str(item,"id");if(id.Length==36&&id[14]=='7'){long ms;if(long.TryParse(id.Substring(0,8)+id.Substring(9,4),System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out ms)){double when=ms/1000.0;if(when>started-60&&when<J.Now+300)Interaction=Math.Max(Interaction,when);}}}
@@ -87,6 +103,18 @@ namespace CodexStrip {
   }
  }
  public static class ThreadNavigation {
+  public static Card Resolve(Card card,IEnumerable<Card> cards){
+   if(card==null)throw new ArgumentNullException("card");var known=cards.ToDictionary(c=>c.Key);var seen=new HashSet<string>();var current=card;
+   for(int depth=0;depth<32;depth++){
+    if(!seen.Add(current.Key))throw new IOException("线程的主线程关联形成循环，无法跳转。");
+    string parent=current.ParentId,host=current.ParentHost.Length>0?current.ParentHost:current.Host;
+    if(parent.Length==0){var owners=known.Values.Where(c=>c.Host==current.Host&&c.ChildIds.Contains(current.Id)).ToArray();if(owners.Length==1){parent=owners[0].Id;host=owners[0].Host;}}
+    if(parent.Length==0){if(current.Ephemeral)throw new IOException("该临时线程的主线程信息暂不可用，请从 Codex 侧栏打开主线程。");return current;}
+    Guid id;if(!Guid.TryParseExact(parent,"D",out id)||string.IsNullOrWhiteSpace(host)||host.Any(char.IsControl))throw new ArgumentException("主线程关联信息无效。");
+    Card next;current=known.TryGetValue(host+"/"+parent,out next)?next:new Card{Id=parent,Host=host};
+   }
+   throw new IOException("线程的主线程关联层级过深，无法跳转。");
+  }
   public static bool UsesDesktopLink(Card card){return card!=null&&!string.IsNullOrEmpty(card.Host)&&card.Host!="local";}
   public static string DesktopLink(Card card){
    Guid id;
@@ -117,7 +145,7 @@ namespace CodexStrip {
   public Action Changed=delegate{};public Settings Settings; bool refreshingUsage;
   public DesktopStream Stream;
   public void ApplyStream(){if(Stream==null)return;var next=Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());MergeStream(next);UpdateCompletions(Cards,next);Cards=next;Changed();}
-  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;live.MergeUnread(previous);}return live;}
+  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;live.MergeUnread(previous);live.Ephemeral|=previous.Ephemeral;if(live.ParentId.Length==0){live.ParentId=previous.ParentId;live.ParentHost=previous.ParentHost;}live.ChildIds=live.ChildIds.Concat(previous.ChildIds).Distinct().ToArray();}return live;}
   void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}Stream.ApplyReadState(cards.Values);ApplyLocalAnswers(cards);}
   bool ApplyLocalAnswers(Dictionary<string,Card> cards){bool changed=false;foreach(var card in cards.Values.Where(c=>c.Host=="local")){string text;if(!localMessages.ClearAnswered(card,out text))continue;card.QuestionPending=false;if(card.Status=="input")card.Status="active";if(text.Length>0){card.Message=text;card.MessageKind="最新对话";}changed=true;}return changed;}
   public static bool NewCompletion(Card previous,Card current){return previous!=null&&!previous.Stale&&!current.Stale&&current.Status=="completed"&&new[]{"active","input","approval","reconnecting"}.Contains(previous.Status);}
@@ -148,6 +176,7 @@ namespace CodexStrip {
    double readObservedAt=J.Now;object result=await Call("list_threads",J.Obj("limit",50));
    var list=J.Arr(J.Get(result,"pinnedThreads")).Concat(J.Arr(J.Get(result,"threads"))).Where(t=>J.Str(t,"kind")=="codex").ToArray();
    var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)c.SetUnread((bool)J.Get(t,"isUnread"),readObservedAt);}
+   foreach(var t in list){string host=J.Str(t,"hostId");if(host.Length==0)host="local";Cards[host+"/"+J.Str(t,"id")].NavigationMetadata(t);}
    // Explicitly tracked links remain discoverable even when the app list omits them.
    foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title="正在读取线程"};try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
    Unavailable=J.Arr(J.Get(result,"unavailableHosts")).Length>0?"部分主机暂不可用":"";
@@ -167,10 +196,10 @@ namespace CodexStrip {
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
   }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);if(Stream!=null)Stream.Watch(Cards.Values);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
   public async Task RefreshUsage(){if(refreshingUsage)return;refreshingUsage=true;try{Usage.Update(await Call("get_usage_limits",J.Obj(),15000));}catch{Usage.Error="额度暂不可读取";}finally{refreshingUsage=false;Changed();}}
-  public async Task Open(Card card){var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(card,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException("已请求切换线程，但 Windows 未允许激活 Codex 窗口。");Settings.Clicks[card.Key]=J.Now;
+  public async Task Open(Card card){var target=ThreadNavigation.Resolve(card,Cards.Values);var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(target,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException("已请求切换线程，但 Windows 未允许激活 Codex 窗口。");Settings.Clicks[card.Key]=J.Now;
    // Shell acceptance cannot confirm that a hosted conversation loaded. Its
    // desktop read receipt will clear completion markers during the next poll.
-   if(!ThreadNavigation.UsesDesktopLink(card)){Settings.PendingCompletions.Remove(card.Key);Card shown;if(Cards.TryGetValue(card.Key,out shown))shown.CompletionPending=false;}
+   if(target.Key==card.Key&&!ThreadNavigation.UsesDesktopLink(target)){Settings.PendingCompletions.Remove(card.Key);Card shown;if(Cards.TryGetValue(card.Key,out shown))shown.CompletionPending=false;}
    Settings.Save();Changed();}
   static object Target(Card c){return c.Cursor.Length>0?J.Obj("threadId",c.Id,"hostId",c.Host,"afterCursor",c.Cursor):J.Obj("threadId",c.Id,"hostId",c.Host);}
  }

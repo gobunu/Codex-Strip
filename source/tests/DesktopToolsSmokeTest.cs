@@ -27,6 +27,7 @@ class DesktopToolsSmokeTest {
    try{
     Settings.DataDir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"navigation-test-data");
     var card=new Card{Id=args[0],Host=args.Length>1?args[1]:"local",Status="completed",TurnId="sample-turn",CompletionPending=true};
+    if(args.Length>2){card.Ephemeral=true;card.ParentId=args[2];card.ParentHost=card.Host;}
     var settings=new Settings();settings.PendingCompletions[card.Key]=card.TurnId;
     var engine=new MonitorEngine(settings,(tool,arguments,timeout)=>bridge.Call(tool,arguments,timeout));engine.Cards[card.Key]=card;
     engine.Open(card).GetAwaiter().GetResult();
