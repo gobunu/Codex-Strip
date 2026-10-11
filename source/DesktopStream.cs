@@ -40,7 +40,12 @@ namespace CodexStrip {
     const string prefix="remote-thread-summaries-v3:";if(!entry.Key.StartsWith(prefix,StringComparison.Ordinal))continue;
     string host=entry.Key.Substring(prefix.Length);if(!next.ContainsKey(host))continue;
     foreach(var summary in J.Arr(entry.Value)){string id=J.Str(summary,"conversationId");if(id.Length==0||J.Str(summary,"hostId")!=host||!(J.Get(summary,"hasUnreadTurn") is bool))continue;
-     var card=new Card{Host=host,Id=id,Status=J.Str(J.Get(summary,"threadRuntimeStatus"),"type")};card.SetUnread((bool)J.Get(summary,"hasUnreadTurn"),0,UnreadSource.CachedSummary,"");summaries[card.Key]=card;
+     var card=new Card{Host=host,Id=id,Status=J.Str(J.Get(summary,"threadRuntimeStatus"),"type")};bool unread=(bool)J.Get(summary,"hasUnreadTurn");Card previous=null;
+     bool same=readIdentity==identity&&desktopSummaries.TryGetValue(card.Key,out previous)&&previous.Unread==unread;
+     double observedAt=same?previous.UnreadUpdated:UnreadClock.Next();card.TurnId=same?previous.TurnId:"";
+     card.SetUnread(unread,observedAt,UnreadSource.CachedSummary,same?previous.UnreadTurnId:"");
+     if(same&&card.Status!="completed"){card.UnreadStatus=previous.UnreadStatus;card.ReadConfirmed=previous.ReadConfirmed;card.ReadConfirmedAt=previous.ReadConfirmedAt;}
+     summaries[card.Key]=card;
     }
    }
    changed=J.Json(desktopUnread)!=J.Json(next)||J.Json(desktopSummaries)!=J.Json(summaries)||readIdentity!=identity;
@@ -48,13 +53,24 @@ namespace CodexStrip {
   }if(changed)Changed();}
   public void ObserveReadState(string host,string id,bool unread,double observedAt){ObserveReadState(host,id,unread,observedAt,"");}
   public void ObserveReadState(string host,string id,bool unread,double observedAt,string turnId){lock(gate){
+   UnreadClock.Observe(observedAt);
    string key=host+"/"+id;Card known;
-   if(string.IsNullOrEmpty(turnId)){StreamState live;if(states.TryGetValue(key,out live)&&live.Preview!=null)turnId=live.Preview.TurnId;else if(wanted.TryGetValue(key,out known))turnId=known.TurnId;}
+   if(string.IsNullOrEmpty(turnId)){StreamState live;Card preview=states.TryGetValue(key,out live)?live.Preview:null;wanted.TryGetValue(key,out known);
+    if(known!=null&&known.TurnId.Length>0&&(preview==null||known.Started>=preview.Started))turnId=known.TurnId;else if(preview!=null)turnId=preview.TurnId;
+   }
    Card state;if(!readUpdates.TryGetValue(key,out state))readUpdates[key]=state=new Card{Host=host,Id=id};state.TurnId=turnId??"";state.SetUnread(unread,observedAt,UnreadSource.Authoritative,state.TurnId);
+   StreamState current;if(states.TryGetValue(key,out current)&&current.Preview!=null)current.Preview.SetUnread(unread,observedAt,UnreadSource.Authoritative,state.TurnId);
   }Changed();}
   void ApplyReadStateLocked(Card card){
    HashSet<string> unread;if(desktopUnread.TryGetValue(card.Host,out unread))card.SetUnread(unread.Contains(card.Id),0,UnreadSource.Persisted,"");
-   Card summary;if(desktopSummaries.TryGetValue(card.Key,out summary))card.MergeUnread(summary);
+   Card summary;if(desktopSummaries.TryGetValue(card.Key,out summary)){
+    // Unscoped cached values acknowledge the first observed turn, not every
+    // future turn while that same value remains in the persisted snapshot.
+    if(summary.UnreadTurnId.Length==0&&card.TurnId.Length>0){summary.TurnId=card.TurnId;summary.UnreadTurnId=card.TurnId;
+     if(summary.UnreadStatus.Length==0||summary.UnreadStatus=="unknown"||summary.UnreadStatus=="idle")summary.UnreadStatus=card.Status;
+     summary.ReadConfirmed=!summary.Unread&&summary.UnreadStatus=="completed";summary.ReadConfirmedAt=summary.ReadConfirmed?summary.UnreadUpdated:0;
+    }card.MergeUnread(summary);
+   }
    Card update;if(readUpdates.TryGetValue(card.Key,out update)){if(update.UnreadTurnId.Length==0&&card.TurnId.Length>0){update.TurnId=card.TurnId;update.UnreadTurnId=card.TurnId;}card.MergeUnread(update);}
   }
   bool ReceiptContextMatches(object context,string host){
@@ -69,8 +85,8 @@ namespace CodexStrip {
   NamedPipeClientStream pipe;bool stopped,started;string client="";public bool Connected{get;private set;}public Action Changed=delegate{};
   public void Start(){if(started)return;started=true;Task.Run((Func<Task>)Run);}
   public void DiscoverKnownThreads(){try{var path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex",".codex-global-state.json");object data;using(var f=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)){using(var r=new StreamReader(f))data=J.Parse(r.ReadToEnd());}var history=J.Get(J.Get(data,"electron-persisted-atom-state"),"prompt-history") as Dictionary<string,object>;if(history==null)return;var hosts=J.Arr(J.Get(data,"remote-projects")).Select(p=>J.Str(p,"hostId")).Where(h=>h.Length>0).Concat(new[]{"local"}).Distinct().ToArray();var assignments=J.Get(data,"thread-project-assignments");var candidates=new List<Card>();foreach(string id in history.Keys.OrderByDescending(x=>x,StringComparer.Ordinal).Take(64)){Guid valid;if(!Guid.TryParse(id,out valid))continue;string known=J.Str(J.Get(assignments,id),"hostId");foreach(string host in known.Length>0?new[]{known}:hosts)candidates.Add(new Card{Id=id,Host=host});}Watch(candidates);}catch{}}
-  public void Watch(IEnumerable<Card> cards){var added=new List<Card>();lock(gate){foreach(var c in cards){if(!wanted.ContainsKey(c.Key)){wanted[c.Key]=c.Copy();added.Add(c.Copy());}}}if(Connected)foreach(var c in added){var t=Follow(c,true);}}
-  public Card[] Latest(){lock(gate){return states.Values.Where(s=>s.Preview!=null).Select(s=>{var c=s.Preview.Copy();ApplyReadStateLocked(c);c.Stale=!Connected||s.Invalid;return c;}).ToArray();}}
+  public void Watch(IEnumerable<Card> cards){var added=new List<Card>();lock(gate){foreach(var c in cards){Card known;if(!wanted.TryGetValue(c.Key,out known)){wanted[c.Key]=c.Copy();added.Add(c.Copy());}else if(c.TurnId.Length>0&&(known.TurnId.Length==0||c.Started>=known.Started))wanted[c.Key]=c.Copy();}}if(Connected)foreach(var c in added){var t=Follow(c,true);}}
+  public Card[] Latest(){lock(gate){return states.Values.Where(s=>s.Preview!=null).Select(s=>{var c=s.Preview.Copy();Card known;c.Stale=!Connected||s.Invalid||(wanted.TryGetValue(c.Key,out known)&&known.TurnId.Length>0&&known.TurnId!=c.TurnId&&known.Started>c.Started);if(!c.Stale)ApplyReadStateLocked(c);return c;}).ToArray();}}
   async Task Send(object msg){var data=Encoding.UTF8.GetBytes(J.Json(msg));await writeLock.WaitAsync();try{var p=pipe;if(p==null||!p.IsConnected)return;await p.WriteAsync(BitConverter.GetBytes(data.Length),0,4);await p.WriteAsync(data,0,data.Length);await p.FlushAsync();}finally{writeLock.Release();}}
   async Task Follow(Card c,bool following){try{await Send(J.Obj("type","broadcast","method","thread-stream-following-changed","version",1,"sourceClientId",client,"params",J.Obj("conversationId",c.Id,"hostId",c.Host,"following",following)));}catch{try{pipe.Dispose();}catch{}}}
   async Task Run(){while(!stopped){try{using(var p=new NamedPipeClientStream(".","codex-ipc",PipeDirection.InOut,PipeOptions.Asynchronous)){pipe=p;await Task.Run(()=>p.Connect(2000));await Send(J.Obj("type","request","requestId",Guid.NewGuid().ToString(),"method","initialize","version",0,"params",J.Obj("clientType","codex-strip")));
@@ -80,7 +96,7 @@ namespace CodexStrip {
    if(type=="response"&&method=="initialize"){client=J.Str(J.Get(msg,"result"),"clientId");Connected=true;Card[] all;lock(gate){all=wanted.Values.ToArray();foreach(var s in states.Values)s.Invalid=true;}foreach(var c in all)await Follow(c,true);Changed();return;}
    if(type!="broadcast")return;var p=J.Get(msg,"params");if(method=="client-status-changed"){if(J.Str(p,"status")=="connected"){Card[] all;lock(gate)all=wanted.Values.ToArray();foreach(var c in all)await Follow(c,true);}else{lock(gate){foreach(var state in states.Values)if(state.Owner==J.Str(p,"clientId"))state.Invalid=true;}Changed();}return;}
    string id=J.Str(p,"conversationId"),host=J.Str(p,"hostId");string key=host+"/"+id;
-   if(method=="thread-read-state-changed"&&J.Num(msg,"version")==3){if(host.Length>0&&id.Length>0&&J.Get(p,"hasUnreadTurn") is bool&&ReceiptContextMatches(J.Get(p,"context"),host))ObserveReadState(host,id,(bool)J.Get(p,"hasUnreadTurn"),J.Now);return;}
+   if(method=="thread-read-state-changed"&&J.Num(msg,"version")==3){if(host.Length>0&&id.Length>0&&J.Get(p,"hasUnreadTurn") is bool&&ReceiptContextMatches(J.Get(p,"context"),host))ObserveReadState(host,id,(bool)J.Get(p,"hasUnreadTurn"),UnreadClock.Next());return;}
    if(method=="thread-stream-following-status-requested"){Card c;lock(gate)wanted.TryGetValue(key,out c);if(c!=null)await Follow(c,true);return;}
    if(method!="thread-stream-state-changed"||J.Num(msg,"version")!=11)return;
    bool resync=false,changed=false;Card target=null;lock(gate){if(!wanted.TryGetValue(key,out target))return;StreamState state;if(!states.TryGetValue(key,out state)){state=new StreamState();states[key]=state;}try{changed=state.Accept(J.Get(p,"change"),J.Str(msg,"sourceClientId"),host,id);resync=state.Invalid;}catch{state.Invalid=true;resync=true;}}
@@ -91,11 +107,18 @@ namespace CodexStrip {
  }
 
  public sealed class StreamState {
-  object root;double revision;string owner="";public string Owner{get{return owner;}}public Card Preview;public bool Invalid;
+  object root;double revision;string owner="";bool rawReadKnown,rawUnread;string rawReadTurn="";double rawReadAt;public string Owner{get{return owner;}}public Card Preview;public bool Invalid;
   public bool Accept(object change,string source,string host,string id){string type=J.Str(change,"type");if(type=="snapshot"){root=Mutable(J.Get(change,"conversationState"));revision=J.Num(change,"revision");owner=source;Invalid=false;}
    else if(type=="patches"){if(root==null||Invalid||source!=owner||revision!=J.Num(change,"baseRevision")){Invalid=true;return false;}foreach(var patch in J.Arr(J.Get(change,"patches")))root=Patch(root,J.Arr(J.Get(patch,"path")),J.Str(patch,"op"),Mutable(J.Get(patch,"value")));revision=J.Num(change,"revision");}
    else return false;
-   var next=Project(root,host,id);bool changed=Preview==null||J.Json(next)!=J.Json(Preview);Preview=next;return changed;
+   var next=Project(root,host,id);
+   if(next.UnreadKnown){
+    bool blockedTrue=next.Unread&&Preview!=null&&Preview.ReadConfirmed&&Preview.UnreadTurnId==next.TurnId;
+    if(!blockedTrue&&(!rawReadKnown||rawUnread!=next.Unread||rawReadTurn!=next.TurnId)){rawReadKnown=true;rawUnread=next.Unread;rawReadTurn=next.TurnId;rawReadAt=UnreadClock.Next();}
+    next.SetUnread(next.Unread,rawReadKnown&&rawReadTurn==next.TurnId?rawReadAt:0,UnreadSource.Stream,next.TurnId);
+   }
+   next.MergeUnread(Preview);
+   bool changed=Preview==null||J.Json(next)!=J.Json(Preview);Preview=next;return changed;
   }
   static object Mutable(object value){var dict=value as Dictionary<string,object>;if(dict!=null)return dict.ToDictionary(p=>p.Key,p=>Mutable(p.Value));if(value is object[]||value is ArrayList)return new ArrayList(J.Arr(value).Select(Mutable).ToArray());return value;}
   static object Patch(object root,object[] path,string op,object value){if(path.Length==0)return op=="remove"?null:value;object at=root;for(int i=0;i<path.Length-1;i++)at=at is ArrayList?((ArrayList)at)[Convert.ToInt32(path[i])]:J.Get(at,Convert.ToString(path[i]));var list=at as ArrayList;var last=path[path.Length-1];if(list!=null){int index=Convert.ToInt32(last);if(op=="remove")list.RemoveAt(index);else if(op=="add")list.Insert(index,value);else if(op=="replace")list[index]=value;else throw new IOException("Unknown stream patch");}else{var dict=(Dictionary<string,object>)at;string key=Convert.ToString(last);if(op=="remove")dict.Remove(key);else if(op=="add"||op=="replace")dict[key]=value;else throw new IOException("Unknown stream patch");}return root;}
@@ -105,8 +128,8 @@ namespace CodexStrip {
    var ordered=turns.OrderByDescending(t=>J.Num(t,"turnStartedAtMs")).ToArray();var latest=ordered.FirstOrDefault();var runtime=J.Get(state,"threadRuntimeStatus");card.Status=J.Str(runtime,"type");if(card.Status.Length==0)card.Status="unknown";
    card.ChildMetadata(turns.SelectMany(t=>J.Arr(J.Get(t,"items"))));
    if(latest!=null){card.Started=J.Num(latest,"turnStartedAtMs")/1000;card.Interaction=card.Started;card.TurnId=J.Str(latest,"turnId");string st=J.Str(latest,"status");if(st=="inProgress")card.Status="active";else if(st=="completed")card.Status="completed";else if(st=="failed"||st=="interrupted")card.Status=st;card.LastError=J.Str(J.Get(latest,"error"),"message");}
-   // Conversation snapshots have no read-state revision. Dedicated receipts and
-   // list_threads observations take precedence, even when this snapshot arrives later.
+   // Conversation snapshots have no read-state revision. Same-turn read
+   // confirmations survive stale snapshots; explicit newer receipts can reset them.
    if(J.Get(state,"hasUnreadTurn") is bool)card.SetUnread((bool)J.Get(state,"hasUnreadTurn"),0,UnreadSource.Stream,card.TurnId);
    card.Interaction=Math.Max(card.Interaction,J.Num(state,"recencyAt")/1000);
    foreach(var t in ordered){var items=J.Arr(J.Get(t,"items"));foreach(var item in items){string kind=J.Str(item,"type");if(kind=="userMessage"||kind=="steeringUserMessage"){string messageId=J.Str(item,"id");long ms;if(messageId.Length==36&&messageId[14]=='7'&&long.TryParse(messageId.Substring(0,8)+messageId.Substring(9,4),System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out ms))card.Interaction=Math.Max(card.Interaction,ms/1000.0);}}

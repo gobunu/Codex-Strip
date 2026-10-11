@@ -58,7 +58,12 @@ namespace CodexStrip {
   }
   public void Save(){Directory.CreateDirectory(DataDir);var path=Path.Combine(DataDir,"settings.json");var tmp=path+".tmp";File.WriteAllText(tmp,J.Json(J.Obj("floatingRects",FloatingRects,"thicknesses",Thicknesses,"monitorScales",MonitorScales,"pendingCompletions",PendingCompletions,"theme",ThemeMode,"uiScale",DefaultUiScale,"count",Count,"topmost",Topmost,"topmostMode",TopmostMode,"reserveWorkArea",ReserveWorkArea,"dockEdge",DockEdge,"dockMonitor",DockMonitor,"dockHorizontalSize",DockHorizontalSize,"dockVerticalSize",DockVerticalSize,"host",Host,"width",Width,"height",Height,"left",Left,"top",Top,"clicks",Clicks,"watched",Watched,"sleepAuto",SleepAuto,"sleepRingCharts",SleepRingCharts,"sleepSmoothRings",SleepSmoothRings,"sleepGlassRefraction",SleepGlassRefraction,"sleepIdleMinutes",SleepIdleMinutes,"sleepWidgets",SleepWidgets.ToArray(),"sleepWallpaperPath",SavedWallpaperPath(),"sleepAdapterId",SleepAdapterId,"sleepSpeedUnit",SleepSpeedUnit,"sleepAccent",SleepAccent,"sleepDim",SleepDim)));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
  }
- public enum UnreadSource { Persisted, CachedSummary, Stream, Authoritative }
+ public enum UnreadSource { Persisted, List, CachedSummary, Stream, Authoritative }
+ static class UnreadClock {
+  static readonly object gate=new object();static double last;
+  public static double Next(){lock(gate){last=Math.Max(J.Now,last+.000001);return last;}}
+  public static void Observe(double when){lock(gate)last=Math.Max(last,when);}
+ }
  public sealed class Card {
   public bool Ephemeral; public string ParentId="",ParentHost=""; public string[] ChildIds=new string[0];
   public void NavigationMetadata(object state){
@@ -77,18 +82,28 @@ namespace CodexStrip {
   })).Where(id=>id.Length>0).Distinct().ToArray();}
   public string Id,Host,Title,Status="unknown",Message="",MessageKind="",TurnId="",LastError="",Cursor="";
   public double Interaction,Started,LastSeen,DetailFetched,UnreadUpdated; public bool Stale,QuestionPending,MessageUnavailable,Live,Unread,UnreadKnown,CompletionPending;
-  public UnreadSource ReadSource;public string UnreadTurnId="",UnreadStatus="";
+  public UnreadSource ReadSource;public string UnreadTurnId="",UnreadStatus="";public bool ReadConfirmed;public double ReadConfirmedAt;
   public bool UnreadResult {get{return Status=="completed"&&(Unread||CompletionPending)&&!Stale&&!QuestionPending;}}
   public void SetUnread(bool unread,double observedAt){SetUnread(unread,observedAt,UnreadSource.Authoritative,TurnId);}
   public void SetUnread(bool unread,double observedAt,UnreadSource source,string turnId){SetUnread(unread,observedAt,source,turnId,Status);}
   void SetUnread(bool unread,double observedAt,UnreadSource source,string turnId,string status){
    turnId=turnId??"";if(turnId.Length==0&&(int)source<(int)UnreadSource.Stream)turnId=TurnId;
+   status=string.IsNullOrEmpty(status)||status=="unknown"||status=="idle"?Status:status;
    // A receipt belongs to the turn it acknowledged. It cannot acknowledge a later turn.
    if(turnId.Length>0&&TurnId.Length>0&&turnId!=TurnId)return;
    bool sameTurn=UnreadTurnId.Length==0||turnId.Length==0||UnreadTurnId==turnId;
-   if(UnreadKnown&&sameTurn&&((int)source<(int)ReadSource||(source==ReadSource&&observedAt<UnreadUpdated)))return;
-   if(UnreadKnown&&sameTurn&&source==ReadSource&&observedAt==UnreadUpdated&&unread==Unread){if(source==UnreadSource.CachedSummary&&status=="completed")UnreadStatus=status;return;}
-   Unread=unread;UnreadKnown=true;UnreadUpdated=observedAt;ReadSource=source;UnreadTurnId=turnId;UnreadStatus=string.IsNullOrEmpty(status)||status=="unknown"||status=="idle"?Status:status;
+   bool confirmed=!unread&&(int)source>=(int)UnreadSource.CachedSummary&&status=="completed"&&turnId.Length>0;
+   if(UnreadKnown&&sameTurn){
+    // Unversioned summaries cannot undo a viewed result. A later explicit
+    // receipt can still mark that same result unread from the desktop menu.
+    if(unread&&ReadConfirmed&&(source!=UnreadSource.Authoritative||observedAt<=ReadConfirmedAt))return;
+    // Replaying the cached false that preceded a manual unread receipt is stale.
+    if(!unread&&Unread&&ReadSource==UnreadSource.Authoritative&&source!=UnreadSource.Authoritative&&observedAt<=UnreadUpdated)return;
+    if(confirmed&&ReadConfirmed&&observedAt<=ReadConfirmedAt)return;
+    if(!confirmed&&((int)source<(int)ReadSource||(source==ReadSource&&observedAt<UnreadUpdated)))return;
+    if(source==ReadSource&&observedAt==UnreadUpdated&&unread==Unread&&!confirmed)return;
+   }
+   Unread=unread;UnreadKnown=true;UnreadUpdated=observedAt;ReadSource=source;UnreadTurnId=turnId;UnreadStatus=status;ReadConfirmed=confirmed;ReadConfirmedAt=confirmed?observedAt:0;
   }
   public void MergeUnread(Card other){if(other!=null&&other.UnreadKnown)SetUnread(other.Unread,other.UnreadUpdated,other.ReadSource,other.UnreadTurnId,other.UnreadStatus);}
   public Card Copy(){return (Card)MemberwiseClone();}
@@ -102,7 +117,7 @@ namespace CodexStrip {
    string cursor=J.Str(poll,"cursor");if(cursor.Length>0)Cursor=cursor;
    var state=J.Get(J.Get(poll,"thread"),"status");var flags=J.Arr(J.Get(state,"activeFlags")).Select(Convert.ToString).ToArray();Status=J.Str(state,"type");
    if(flags.Contains("waitingOnApproval"))Status="approval";else if(flags.Contains("waitingOnUserInput"))Status="input";else if(flags.Contains("reconnecting"))Status="reconnecting";
-   var turn=J.Get(poll,"latestTurn");if(turn!=null){string tid=J.Str(turn,"id");double started=J.Num(turn,"startedAt");if(started>0){if(TurnId.Length==0)Interaction=started;else Interaction=Math.Max(Interaction,started);Started=started;}if(TurnId!=tid){DetailFetched=0;if(UnreadKnown&&UnreadTurnId.Length>0&&UnreadTurnId!=tid){Unread=false;UnreadKnown=false;UnreadUpdated=0;UnreadTurnId="";UnreadStatus="";ReadSource=UnreadSource.Persisted;}TurnId=tid;}string ts=J.Str(turn,"status");if(ts=="failed")Status="failed";else if(ts=="interrupted")Status="interrupted";else if(ts=="completed"&&(Status=="idle"||Status=="notLoaded"))Status="completed";LastError=J.Str(J.Get(turn,"error"),"message");}
+   var turn=J.Get(poll,"latestTurn");if(turn!=null){string tid=J.Str(turn,"id");double started=J.Num(turn,"startedAt");if(started>0){if(TurnId.Length==0)Interaction=started;else Interaction=Math.Max(Interaction,started);Started=started;}if(TurnId!=tid){DetailFetched=0;if(UnreadKnown&&UnreadTurnId.Length>0&&UnreadTurnId!=tid){Unread=false;UnreadKnown=false;UnreadUpdated=0;UnreadTurnId="";UnreadStatus="";ReadSource=UnreadSource.Persisted;ReadConfirmed=false;ReadConfirmedAt=0;}TurnId=tid;}string ts=J.Str(turn,"status");if(ts=="failed")Status="failed";else if(ts=="interrupted")Status="interrupted";else if(ts=="completed"&&(Status=="idle"||Status=="notLoaded"))Status="completed";LastError=J.Str(J.Get(turn,"error"),"message");}
    var msg=J.Get(poll,"latestAssistantMessage");string text=msg as string;if(text==null)text=J.Str(msg,"text");if(!string.IsNullOrWhiteSpace(text)){Message=text;MessageKind="进展";}
    LastSeen=J.Now;Stale=false;
   }
@@ -156,17 +171,18 @@ namespace CodexStrip {
   public string Connection="正在连接 Codex…",Unavailable="";public bool Connected,Refreshing;public DateTime LastRefresh;
   public Action Changed=delegate{};public Settings Settings; bool refreshingUsage;
   public DesktopStream Stream;
+  readonly Dictionary<string,Card> listedReadState=new Dictionary<string,Card>();
   public void ApplyStream(){if(Stream==null)return;var next=Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());MergeStream(next);UpdateCompletions(Cards,next);Cards=next;Changed();}
-  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&live.Stale&&!previous.Stale)return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;if(!(live.UnreadKnown&&live.ReadSource==UnreadSource.Stream&&previous.ReadSource==UnreadSource.Stream))live.MergeUnread(previous);live.Ephemeral|=previous.Ephemeral;if(live.ParentId.Length==0){live.ParentId=previous.ParentId;live.ParentHost=previous.ParentHost;}live.ChildIds=live.ChildIds.Concat(previous.ChildIds).Distinct().ToArray();}return live;}
-  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}Stream.ApplyReadState(cards.Values);ApplyLocalAnswers(cards);}
+  public static Card PreferFresh(Card previous,Card live){if(previous!=null&&((live.Stale&&!previous.Stale)||(previous.TurnId.Length>0&&live.TurnId.Length>0&&previous.TurnId!=live.TurnId&&previous.Started>live.Started)))return previous;if(previous!=null){live.Cursor=previous.Cursor;live.DetailFetched=previous.DetailFetched;live.MergeUnread(previous);live.Ephemeral|=previous.Ephemeral;if(live.ParentId.Length==0){live.ParentId=previous.ParentId;live.ParentHost=previous.ParentHost;}live.ChildIds=live.ChildIds.Concat(previous.ChildIds).Distinct().ToArray();}return live;}
+  void MergeStream(Dictionary<string,Card> cards){if(Stream==null)return;Stream.Watch(cards.Values);foreach(var live in Stream.Latest()){Card previous;cards.TryGetValue(live.Key,out previous);if(previous==null&&live.Stale)continue;cards[live.Key]=PreferFresh(previous,live);}Stream.ApplyReadState(cards.Values);ApplyLocalAnswers(cards);}
   bool ApplyLocalAnswers(Dictionary<string,Card> cards){bool changed=false;foreach(var card in cards.Values.Where(c=>c.Host=="local")){string text;if(!localMessages.ClearAnswered(card,out text))continue;card.QuestionPending=false;if(card.Status=="input")card.Status="active";if(text.Length>0){card.Message=text;card.MessageKind="最新对话";}changed=true;}return changed;}
   public static bool NewCompletion(Card previous,Card current){return previous!=null&&!previous.Stale&&!current.Stale&&current.Status=="completed"&&new[]{"active","input","approval","reconnecting"}.Contains(previous.Status);}
   // Local completion markers are only a fallback while desktop read state is unknown.
   // An explicit desktop read/unread value owns the notification, including after restart.
   public static bool ReconcileCompletion(Settings settings,Card previous,Card current){
    bool changed=false;string turn;
-   // A cached false observed while running does not acknowledge the result that follows.
-   bool readCurrent=current.UnreadKnown&&!(current.Status=="completed"&&!current.Unread&&(int)current.ReadSource<(int)UnreadSource.Stream&&current.UnreadStatus!="completed");
+   // A false observed while running does not acknowledge the result that follows.
+   bool readCurrent=current.UnreadKnown&&!(current.Status=="completed"&&!current.Unread&&current.UnreadStatus!="completed");
    if(settings.PendingCompletions.TryGetValue(current.Key,out turn)&&(readCurrent||(turn.Length>0&&current.TurnId.Length>0&&turn!=current.TurnId))){settings.PendingCompletions.Remove(current.Key);changed=true;}
    if(!readCurrent&&NewCompletion(previous,current)){settings.PendingCompletions[current.Key]=current.TurnId;changed=true;}
    current.CompletionPending=settings.PendingCompletions.ContainsKey(current.Key);return changed;
@@ -187,7 +203,7 @@ namespace CodexStrip {
    // Work only on detached cards; readers keep the last complete snapshot.
    var Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());bool Connected=this.Connected;string Connection=this.Connection,Unavailable=this.Unavailable;
    try {
-   double readObservedAt=J.Now;object result=await Call("list_threads",J.Obj("limit",50));var listedUnread=new Dictionary<string,bool>();
+   double readObservedAt=UnreadClock.Next();object result=await Call("list_threads",J.Obj("limit",50));var listedUnread=new Dictionary<string,bool>();
    var list=J.Arr(J.Get(result,"pinnedThreads")).Concat(J.Arr(J.Get(result,"threads"))).Where(t=>J.Str(t,"kind")=="codex").ToArray();
    var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)listedUnread[key]=(bool)J.Get(t,"isUnread");}
    foreach(var t in list){string host=J.Str(t,"hostId");if(host.Length==0)host="local";Cards[host+"/"+J.Str(t,"id")].NavigationMetadata(t);}
@@ -209,9 +225,12 @@ namespace CodexStrip {
    foreach(var c in Card.Sort(Cards.Values,Settings).Concat(Cards.Values.Where(c=>c.Status=="active"||c.Id==Bridge.ContextId)).Distinct()){if(J.Now-c.DetailFetched<5&&c.Message.Length>0)continue;try {c.Detail(await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000));}catch{c.DetailFetched=J.Now;}}
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}
    // Bind a successful list observation after polling has identified its current turn.
-   foreach(var entry in listedUnread){Card c;if(Cards.TryGetValue(entry.Key,out c))c.SetUnread(entry.Value,readObservedAt,UnreadSource.Authoritative,c.TurnId);}
+   foreach(var entry in listedUnread){Card c;if(!Cards.TryGetValue(entry.Key,out c))continue;Card observation;
+    if(!listedReadState.TryGetValue(entry.Key,out observation)||observation.TurnId!=c.TurnId||observation.Unread!=entry.Value){observation=new Card{Host=c.Host,Id=c.Id,TurnId=c.TurnId,Status=c.Status};observation.SetUnread(entry.Value,readObservedAt,UnreadSource.List,c.TurnId);listedReadState[entry.Key]=observation;}
+    c.MergeUnread(observation);
+   }
    LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
-  }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);if(Stream!=null)Stream.Watch(Cards.Values);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
+  }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
   public async Task RefreshUsage(){if(refreshingUsage)return;refreshingUsage=true;try{Usage.Update(await Call("get_usage_limits",J.Obj(),15000));}catch{Usage.Error="额度暂不可读取";}finally{refreshingUsage=false;Changed();}}
   public async Task Open(Card card){var target=ThreadNavigation.Resolve(card,Cards.Values);var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(target,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException(UiText.T("已请求切换线程，但 Windows 未允许激活 Codex 窗口。","Conversation opened; activate the Codex window from the taskbar."));Settings.Clicks[card.Key]=J.Now;
    // Shell acceptance cannot confirm that a hosted conversation loaded. Its
