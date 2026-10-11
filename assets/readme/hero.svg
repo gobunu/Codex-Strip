@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="500" viewBox="0 0 1600 500">
+<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#10152c"/><stop offset="1" stop-color="#252057"/></linearGradient><linearGradient id="accent"><stop stop-color="#91eee0"/><stop offset="1" stop-color="#b6b4ff"/></linearGradient><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#aeb6e5" stroke-opacity=".055"/></pattern></defs>
+<rect width="1600" height="500" rx="24" fill="url(#bg)"/><rect width="1600" height="500" rx="24" fill="url(#grid)"/>
+<circle cx="1430" cy="180" r="160" fill="none" stroke="#6b69af" stroke-opacity=".2"/><circle cx="1430" cy="180" r="220" fill="none" stroke="#6b69af" stroke-opacity=".15"/>
+<g transform="translate(88 72)"><rect width="60" height="60" rx="16" fill="#6554ff"/><path d="M15 18H45M15 29H45M15 40H35" stroke="white" stroke-width="6" stroke-linecap="round"/><circle cx="44" cy="40" r="3" fill="white"/></g>
+<text x="174" y="116" fill="#f2f4ff" font-family="Segoe UI,Arial,sans-serif" font-size="40" font-weight="700">Codex Strip</text>
+<text x="90" y="225" fill="white" font-family="Microsoft YaHei,Segoe UI,sans-serif" font-size="59" font-weight="700">让 Codex 的进展，留在视线里。</text>
+<text x="94" y="287" fill="#b8bfd8" font-family="Microsoft YaHei,Segoe UI,sans-serif" font-size="26">任务在跑时，关注进展。空闲下来，看见系统。</text>
+<rect x="94" y="340" width="368" height="2" rx="1" fill="url(#accent)"/>
+<g font-family="Segoe UI,Arial,sans-serif" font-size="18" letter-spacing="3" fill="#c6cbe3"><text x="94" y="389">TASKS</text><text x="234" y="389">ATTENTION</text><text x="442" y="389">RESOURCES</text></g>
+<g transform="translate(1085 342)"><rect width="320" height="48" rx="24" fill="#ffffff" fill-opacity=".055" stroke="#b9b9e4" stroke-opacity=".2"/><circle cx="28" cy="24" r="5" fill="#91eee0"/><text x="46" y="30" fill="#e0e6f8" font-family="Segoe UI,Arial,sans-serif" font-size="16">Windows · Portable · Multi-screen</text></g>
+</svg>
