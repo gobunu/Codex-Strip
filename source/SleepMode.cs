@@ -132,7 +132,7 @@ namespace CodexStrip {
   public void StartSleepWatcher(){sleepTicker.Tick+=SleepTick;sleepTicker.Start();ringTicker.Tick+=RingTick;EvaluateSleep();}
   public void StopSleepWatcher(){sleepTicker.Stop();sleepTicker.Tick-=SleepTick;ringTicker.Stop();ringTicker.Tick-=RingTick;FinishSleepTransition(++sleepTransition);sampler.Dispose();}
   async void SleepTick(object sender,EventArgs e){EvaluateSleep();if(sleeping&&IsVisible&&sleepClock!=null)sleepClock.Text=DateTime.Now.ToString("HH:mm:ss");if(!sleeping||sampling||!IsVisible)return;sampling=true;try{ResourceSnapshot next=DemoMode?DemoResources():await Task.Run(()=>sampler.Sample(Config.SleepAdapterId));if(sleeping&&!closing){resources=next;SetRingTargets();SetRateTargets(true);UpdateSleepView();StartRingAnimation();}}catch{}finally{sampling=false;}}
-  static ResourceSnapshot DemoResources(){double t=DateTime.Now.Second,phase=DateTime.Now.TimeOfDay.TotalSeconds;return new ResourceSnapshot{Cpu=28+t%9,Gpu=17+t%7,Memory=63.4,Download=(3.8+1.5*Math.Sin(phase*1.2))*1024*1024,Upload=(.7+.3*Math.Sin(phase*.8+1))*1024*1024,DiskRead=(2.1+1.2*Math.Sin(phase*.9))*1024*1024,DiskWrite=(.8+.4*Math.Sin(phase*.6+2))*1024*1024,NetworkName="演示网卡",CpuProcesses=new[]{new ResourcePart("Codex",11),new ResourcePart("浏览器",7),new ResourcePart("系统服务",4)},GpuProcesses=new[]{new ResourcePart("浏览器",9),new ResourcePart("Codex",5),new ResourcePart("桌面窗口",3)},MemoryProcesses=new[]{new ResourcePart("浏览器",17),new ResourcePart("Codex",11),new ResourcePart("桌面窗口",5)}};}
+  static ResourceSnapshot DemoResources(){double t=DateTime.Now.Second,phase=DateTime.Now.TimeOfDay.TotalSeconds;return new ResourceSnapshot{Cpu=28+t%9,Gpu=17+t%7,Memory=63.4,Download=(3.8+1.5*Math.Sin(phase*1.2))*1024*1024,Upload=(.7+.3*Math.Sin(phase*.8+1))*1024*1024,DiskRead=(2.1+1.2*Math.Sin(phase*.9))*1024*1024,DiskWrite=(.8+.4*Math.Sin(phase*.6+2))*1024*1024,NetworkName=UiText.T("演示网卡","Demo adapter"),CpuProcesses=new[]{new ResourcePart("Codex",11),new ResourcePart(UiText.T("浏览器","Browser"),7),new ResourcePart(UiText.T("系统服务","System services"),4)},GpuProcesses=new[]{new ResourcePart(UiText.T("浏览器","Browser"),9),new ResourcePart("Codex",5),new ResourcePart(UiText.T("桌面窗口","Desktop"),3)},MemoryProcesses=new[]{new ResourcePart(UiText.T("浏览器","Browser"),17),new ResourcePart("Codex",11),new ResourcePart(UiText.T("桌面窗口","Desktop"),5)}};}
   public void ShowSleepDemo(){resources=DemoResources();SetSleeping(true);}
   public void ShowSleepMonitor(){ClosePanel();manualSleepCards=Engine.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());if(DemoMode)resources=DemoResources();SetSleeping(true);SleepTick(null,EventArgs.Empty);}
   public bool TestSleepClick(){if(sleepLayer==null||taskPage==null)return false;var click=new MouseButtonEventArgs(Mouse.PrimaryDevice,Environment.TickCount,MouseButton.Left){RoutedEvent=UIElement.PreviewMouseLeftButtonDownEvent};sleepLayer.RaiseEvent(click);return !sleeping&&!sleepLayer.IsHitTestVisible&&taskPage.IsHitTestVisible&&taskPage.Visibility==Visibility.Visible;}
@@ -216,10 +216,10 @@ namespace CodexStrip {
    var left=new StackPanel{Orientation=portrait?Orientation.Vertical:Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
    var titleRow=new StackPanel{Orientation=Orientation.Horizontal};
    titleRow.Children.Add(new Border{Width=7,Height=7,CornerRadius=new CornerRadius(4),Background=Accent(),Margin=new Thickness(0,0,10,0)});
-   var name=SleepText(DemoMode?"静息监控 · 演示":"静息监控",15,SleepInk);name.FontWeight=FontWeights.SemiBold;titleRow.Children.Add(name);left.Children.Add(titleRow);
+   var name=SleepText(DemoMode?UiText.T("静息监控 · 演示","Idle monitor · Demo"):UiText.T("静息监控","Idle monitor"),15,SleepInk);name.FontWeight=FontWeights.SemiBold;titleRow.Children.Add(name);left.Children.Add(titleRow);
    header.Children.Add(left);
    sleepClock=SleepText("",portrait?16:20,SleepInk);sleepClock.FontWeight=FontWeights.SemiBold;sleepClock.HorizontalAlignment=HorizontalAlignment.Right;Grid.SetColumn(sleepClock,1);header.Children.Add(sleepClock);
-   if(!portrait){var back=SleepText("返回任务  ↗",12,SleepInk);back.Margin=new Thickness(18,0,2,0);Grid.SetColumn(back,2);header.Children.Add(back);}
+   if(!portrait){var back=SleepText(UiText.T("返回任务  ↗","Back to tasks  ↗"),12,SleepInk);back.Margin=new Thickness(18,0,2,0);Grid.SetColumn(back,2);header.Children.Add(back);}
    if(sleepWallpaperActive){header.Margin=new Thickness(12,0,10,0);var headerGlass=GlassSurface(header,20);headerGlass.Margin=new Thickness(4,0,4,5);content.Children.Add(headerGlass);}else content.Children.Add(new Border{CornerRadius=new CornerRadius(8),Background=Brushes.Transparent,Child=header});
    sleepTiles=new UniformGrid{Columns=1,Rows=1};
    var metricScroll=new ScrollViewer{Content=sleepTiles,HorizontalScrollBarVisibility=ScrollBarVisibility.Auto,VerticalScrollBarVisibility=ScrollBarVisibility.Disabled,Background=Brushes.Transparent};
@@ -246,7 +246,7 @@ namespace CodexStrip {
    if(canvas.Children.Count==0){
     canvas.ClipToBounds=true;
     for(int line=1;line<=2;line++){double y=height*line/3;canvas.Children.Add(new System.Windows.Shapes.Line{X1=0,X2=width,Y1=y,Y2=y,Stroke=Design.B(SleepLine),StrokeThickness=.6,Opacity=.55});}
-    for(int channel=0;channel<2;channel++){var curve=new System.Windows.Shapes.Path{Stroke=RateColor(channel),StrokeThickness=2,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,ToolTip=(id=="network"?(channel==0?"下载":"上传"):(channel==0?"读取":"写入"))+" · 最近 10 秒"};visual.Curves[channel]=curve;canvas.Children.Add(curve);}
+    for(int channel=0;channel<2;channel++){var curve=new System.Windows.Shapes.Path{Stroke=RateColor(channel),StrokeThickness=2,StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round,ToolTip=(id=="network"?(channel==0?UiText.T("下载","Download"):UiText.T("上传","Upload")):(channel==0?UiText.T("读取","Read"):UiText.T("写入","Write")))+UiText.T(" · 最近 10 秒"," · Last 10 seconds")};visual.Curves[channel]=curve;canvas.Children.Add(curve);}
    }
    for(int channel=0;channel<2;channel++){
     var motion=channel==0?state.First:state.Second;if(!motion.Available&&motion.Value<=0){visual.Curves[channel].Data=Geometry.Empty;continue;}
@@ -260,7 +260,7 @@ namespace CodexStrip {
    canvas.Children.Clear();var baseColor=((SolidColorBrush)Accent()).Color;RingBase(canvas,center,radius,thickness,Design.B(SleepLine));
    double used=Math.Max(0,Math.Min(100,state.Total.Value)),offset=-90,sum=0;int index=0;
    foreach(string name in state.Order){var motion=state.Parts[name];double value=Math.Max(0,Math.Min(used-sum,motion.Value));if(value<=0)continue;RingArc(canvas,center,radius,thickness,offset,value*3.6,new SolidColorBrush(Shade(baseColor,index++)),name+" "+value.ToString("0.#")+"%");offset+=value*3.6;sum+=value;}
-   double other=Math.Max(0,used-sum);RingArc(canvas,center,radius,thickness,offset,other*3.6,new SolidColorBrush(Shade(baseColor,index==0?0:4)),"其他程序 "+other.ToString("0.#")+"%");
+   double other=Math.Max(0,used-sum);RingArc(canvas,center,radius,thickness,offset,other*3.6,new SolidColorBrush(Shade(baseColor,index==0?0:4)),UiText.T("其他程序 ","Other processes ")+other.ToString("0.#")+"%");
    visual.Label.Text=Percent(state.Available?(double?)used:null);
   }
   FrameworkElement RingChart(string id,double diameter){
@@ -269,10 +269,10 @@ namespace CodexStrip {
    var visual=new RingVisual{Canvas=canvas,Label=amount,Diameter=diameter};ringVisuals[id]=visual;DrawRing(id,visual);
    return chart;
   }
-  UIElement RingLegend(ResourcePart[] parts,bool compact){var legend=new StackPanel{VerticalAlignment=VerticalAlignment.Center,Margin=compact?new Thickness(14,0,0,0):new Thickness(0,3,0,0)};if(parts==null||parts.Length==0){legend.Children.Add(SleepText("分程序数据读取中",10,SleepMuted));return legend;}var baseColor=((SolidColorBrush)Accent()).Color;for(int i=0;i<Math.Min(3,parts.Length);i++){var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(new Border{Width=6,Height=6,CornerRadius=new CornerRadius(3),Background=new SolidColorBrush(Shade(baseColor,i)),Margin=new Thickness(0,0,6,0)});var label=SleepText(parts[i].Name+"  "+parts[i].Percent.ToString("0.#")+"%",10,SleepMuted);label.MaxWidth=compact?(Portrait?178:80):208;row.Children.Add(label);legend.Children.Add(row);}return legend;}
+  UIElement RingLegend(ResourcePart[] parts,bool compact){var legend=new StackPanel{VerticalAlignment=VerticalAlignment.Center,Margin=compact?new Thickness(14,0,0,0):new Thickness(0,3,0,0)};if(parts==null||parts.Length==0){var pending=SleepText(UiText.T("分程序数据读取中","Loading processes"),10,SleepMuted);pending.MaxWidth=compact?(Portrait?178:80):208;legend.Children.Add(pending);return legend;}var baseColor=((SolidColorBrush)Accent()).Color;for(int i=0;i<Math.Min(3,parts.Length);i++){var row=new StackPanel{Orientation=Orientation.Horizontal};row.Children.Add(new Border{Width=6,Height=6,CornerRadius=new CornerRadius(3),Background=new SolidColorBrush(Shade(baseColor,i)),Margin=new Thickness(0,0,6,0)});var label=SleepText(parts[i].Name+"  "+parts[i].Percent.ToString("0.#")+"%",10,SleepMuted);label.MaxWidth=compact?(Portrait?178:80):208;label.ToolTip=label.Text;row.Children.Add(label);legend.Children.Add(row);}return legend;}
   void AddRingMetric(StackPanel values,string id,ResourcePart[] parts){bool compact=Portrait,shortWindow=UiHeight<245;double diameter=compact?94:shortWindow?88:Math.Max(100,Math.Min(126,UiHeight-152));var chart=RingChart(id,diameter);if(compact||shortWindow){var row=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};row.Children.Add(chart);row.Children.Add(RingLegend(parts,true));values.Children.Add(row);}else{values.Children.Add(chart);values.Children.Add(RingLegend(parts,false));}}
   void AddMetric(string id,int index,int columns){
-   string label=id=="cpu"?"CPU":id=="gpu"?"GPU":id=="memory"?"内存":id=="network"?"网络":"磁盘";
+   string label=id=="cpu"?"CPU":id=="gpu"?"GPU":id=="memory"?UiText.T("内存","Memory"):id=="network"?UiText.T("网络","Network"):UiText.T("磁盘","Disk");
    Border cell;bool added=!sleepCells.TryGetValue(id,out cell);if(added){cell=new Border{BorderBrush=SleepDivider,BorderThickness=sleepWallpaperActive?new Thickness(0):new Thickness(index%columns==0?0:1,index<columns?0:1,0,0),Padding=sleepWallpaperActive?new Thickness(14,10,14,10):new Thickness(18,10,18,10),ClipToBounds=true};sleepCells[id]=cell;}
    var grid=new Grid();grid.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});grid.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});cell.Child=grid;
    var title=SleepText(label,12,SleepMuted);title.FontWeight=FontWeights.Medium;grid.Children.Add(title);
@@ -285,14 +285,14 @@ namespace CodexStrip {
     var rate=RateState(id);
     var primary=new StackPanel{Orientation=Orientation.Horizontal};
     primary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=RateColor(0),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
-    var firstLabel=SleepText(id=="network"?"下载":"读取",11);firstLabel.Foreground=RateColor(0);primary.Children.Add(firstLabel);
-    var first=SleepText(Speed(rate.DisplayFirst),24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
+    var firstLabel=SleepText(id=="network"?UiText.T("下载","Down"):UiText.T("读取","Read"),11);firstLabel.Foreground=RateColor(0);firstLabel.ToolTip=id=="network"?UiText.T("下载","Download"):UiText.T("读取","Read");primary.Children.Add(firstLabel);
+    var first=SleepText(Speed(rate.DisplayFirst),UiText.English?22:24,SleepInk);first.FontWeight=FontWeights.SemiBold;first.Margin=new Thickness(10,0,0,0);primary.Children.Add(first);values.Children.Add(primary);
     var secondary=new StackPanel{Orientation=Orientation.Horizontal,Margin=new Thickness(0,8,0,0)};
     secondary.Children.Add(new System.Windows.Shapes.Ellipse{Width=6,Height=6,Fill=RateColor(1),Margin=new Thickness(0,0,6,0),VerticalAlignment=VerticalAlignment.Center});
-    var secondLabel=SleepText(id=="network"?"上传":"写入",11);secondLabel.Foreground=RateColor(1);secondary.Children.Add(secondLabel);
+    var secondLabel=SleepText(id=="network"?UiText.T("上传","Up"):UiText.T("写入","Write"),11);secondLabel.Foreground=RateColor(1);secondLabel.ToolTip=id=="network"?UiText.T("上传","Upload"):UiText.T("写入","Write");secondary.Children.Add(secondLabel);
     var second=SleepText(Speed(rate.DisplaySecond),17,SleepMuted);second.Margin=new Thickness(10,0,0,0);secondary.Children.Add(second);values.Children.Add(secondary);
     double width=Math.Max(120,sleepTiles.Width/Math.Max(1,columns)-40),height=UiHeight<245?25:40;
-    var graph=new Canvas{Width=width,Height=height,Margin=new Thickness(0,6,0,0),ToolTip="最近 10 秒趋势 · 纵轴按峰值自动缩放"};values.Children.Add(graph);
+    var graph=new Canvas{Width=width,Height=height,Margin=new Thickness(0,6,0,0),ToolTip=UiText.T("最近 10 秒趋势 · 纵轴按峰值自动缩放","Last 10 seconds · Vertical scale follows the peak")};values.Children.Add(graph);
     var visual=new RateVisual{Canvas=graph,Width=width,Height=height};rateVisuals[id]=visual;DrawRateTrace(id,visual,DateTime.UtcNow);
    }
    if(added){if(sleepWallpaperActive){var panel=GlassSurface(cell,26);panel.Margin=new Thickness(4,index<columns?0:4,4,4);sleepTiles.Children.Add(panel);}else sleepTiles.Children.Add(cell);}

@@ -42,13 +42,13 @@ namespace CodexStrip {
      if(tools.Any(t=>J.Str(t,"name")=="list_threads")&&tools.Any(t=>J.Str(t,"name")=="wait_threads")){PipeName=name;return;}
     }catch{}
    }
-   PipeName=null;throw new IOException("未连接 Codex，请先打开桌面应用。若仍无法连接，请以与你的 Codex 相同的用户权限启动看板。");
+   PipeName=null;throw new IOException(UiText.T("未连接 Codex，请先打开桌面应用。若仍无法连接，请以与你的 Codex 相同的用户权限启动看板。","Open the Codex desktop app and run Strip with the same Windows user permissions."));
   }
   public void Reset(){PipeName=null;}
   public async Task<object> Call(string tool,object args,int timeout=12000) {
    if(tool!="list_threads"&&tool!="wait_threads"&&tool!="read_thread"&&tool!="navigate_to_codex_page"&&tool!="get_usage_limits")throw new InvalidOperationException("Unsupported operation");
    if(PipeName==null)await Discover();
-   if(ContextId==null)throw new IOException("未找到本地任务上下文，请在 Codex 中打开一个已有本地任务后重试。");
+   if(ContextId==null)throw new IOException(UiText.T("未找到本地任务上下文，请在 Codex 中打开一个已有本地任务后重试。","Open an existing local conversation in Codex and try again."));
    // Desktop app tools require the originating surface for reads and navigation.
    object result;try {result=await Rpc(PipeName,"tools/call",J.Obj("namespace","codex_app","tool",tool,"arguments",args,"threadId",ContextId,"turnId","mcp-turn-monitor-probe","callId","strip-"+Guid.NewGuid().ToString(),"callerSource","codex"),timeout);}catch(Exception e){throw new IOException(tool+": "+e.Message,e);}
    var content=J.Arr(J.Get(result,"contentItems"));

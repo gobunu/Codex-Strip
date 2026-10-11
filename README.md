@@ -16,7 +16,7 @@ Windows 上的 Codex 任务状态条，支持横向或竖向副屏。显示任�
   <img src="screenshots/tasks-light.png" alt="任务看板：主机、任务标题、最新进展、状态与周剩余额度" width="100%">
 </picture>
 
-显示任务主机、状态、最新消息和周剩余额度。完成提醒跟随 Codex 的已读状态。截图使用演示数据，提供明暗两种主题。
+显示任务主机、状态、最新消息和周剩余额度。完成提醒跟随 Codex 的已读状态。
 
 ### 资源监控
 
@@ -44,7 +44,7 @@ Windows 上的 Codex 任务状态条，支持横向或竖向副屏。显示任�
 
 **运行条件：** Windows、.NET Framework 4.8，以及正在运行的 Codex 桌面应用。
 
-1. 从 [最新 Release](https://github.com/gobunu/Codex-Strip/releases/latest) 下载 `CodexStrip-portable.zip` 并解压。
+1. 从 [最新 Release](https://github.com/gobunu/Codex-Strip/releases/latest) 下载中文包 `CodexStrip-portable-zh-CN.zip` 或英文包 `CodexStrip-portable-en.zip` 并解压。
 2. 打开 Codex 桌面应用，再运行 `CodexStrip.exe`。请保留同目录的 `CodexStrip.exe.config`。
 3. 在设置中选择显示器、停靠位置、任务数量与界面倍率。
 
@@ -65,11 +65,16 @@ Windows 上的 Codex 任务状态条，支持横向或竖向副屏。显示任�
 在 Windows PowerShell 中运行：
 
 ```powershell
-./source/build.ps1
+./source/build.ps1 -Language zh-CN
 ./CodexStrip.exe --self-test
 ./CodexStrip.exe --settings-test
-./source/package.ps1
+./source/package.ps1 -Language all
 ```
+
+| 脚本 | 语言选项 |
+| :--- | :--- |
+| `build.ps1 -Language` | `zh-CN`（默认）或 `en` |
+| `package.ps1 -Language` | `zh-CN`、`en` 或 `all`（默认，两种语言分别打包） |
 
 `source/tests/` 包含开发验证程序：桌面接口读取与跳转、临时线程到主线程的关联，以及设置、布局、静息与资源显示。部分测试会操作窗口或临时预留屏幕工作区。
 

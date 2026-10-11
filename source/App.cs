@@ -16,6 +16,7 @@ using System.Windows.Markup;
 namespace CodexStrip {
  public static class Program {
   [STAThread] public static int Main(string[] args){
+   if(args.Contains("--build-language")){Console.WriteLine(UiText.T("zh-CN","en"));return 0;}
    if(args.Contains("--self-test"))return SelfTest();
    if(args.Contains("--settings-test"))return SettingsTest();
    if(args.Contains("--resource-test")){using(var sampler=new ResourceSampler()){sampler.Sample("");System.Threading.Thread.Sleep(2200);var value=sampler.Sample("");File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"resource-test.json"),J.Json(J.Obj("cpu",value.Cpu,"gpu",value.Gpu,"memory",value.Memory,"download",value.Download,"upload",value.Upload,"diskRead",value.DiskRead,"diskWrite",value.DiskWrite,"networkName",value.NetworkName,"cpuProcesses",value.CpuProcesses.Select(p=>J.Obj("name",p.Name,"percent",p.Percent)).ToArray(),"gpuProcesses",value.GpuProcesses.Select(p=>J.Obj("name",p.Name,"percent",p.Percent)).ToArray(),"memoryProcesses",value.MemoryProcesses.Select(p=>J.Obj("name",p.Name,"percent",p.Percent)).ToArray())));return value.Cpu.HasValue&&value.Memory.HasValue?0:1;}}

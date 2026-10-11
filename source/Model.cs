@@ -106,19 +106,19 @@ namespace CodexStrip {
   public static Card Resolve(Card card,IEnumerable<Card> cards){
    if(card==null)throw new ArgumentNullException("card");var known=cards.ToDictionary(c=>c.Key);var seen=new HashSet<string>();var current=card;
    for(int depth=0;depth<32;depth++){
-    if(!seen.Add(current.Key))throw new IOException("线程的主线程关联形成循环，无法跳转。");
+    if(!seen.Add(current.Key))throw new IOException(UiText.T("线程的主线程关联形成循环，无法跳转。","The parent conversation links form a cycle."));
     string parent=current.ParentId,host=current.ParentHost.Length>0?current.ParentHost:current.Host;
     if(parent.Length==0){var owners=known.Values.Where(c=>c.Host==current.Host&&c.ChildIds.Contains(current.Id)).ToArray();if(owners.Length==1){parent=owners[0].Id;host=owners[0].Host;}}
-    if(parent.Length==0){if(current.Ephemeral)throw new IOException("该临时线程的主线程信息暂不可用，请从 Codex 侧栏打开主线程。");return current;}
-    Guid id;if(!Guid.TryParseExact(parent,"D",out id)||string.IsNullOrWhiteSpace(host)||host.Any(char.IsControl))throw new ArgumentException("主线程关联信息无效。");
+    if(parent.Length==0){if(current.Ephemeral)throw new IOException(UiText.T("该临时线程的主线程信息暂不可用，请从 Codex 侧栏打开主线程。","Open the parent conversation from the Codex sidebar."));return current;}
+    Guid id;if(!Guid.TryParseExact(parent,"D",out id)||string.IsNullOrWhiteSpace(host)||host.Any(char.IsControl))throw new ArgumentException(UiText.T("主线程关联信息无效。","Invalid parent conversation link."));
     Card next;current=known.TryGetValue(host+"/"+parent,out next)?next:new Card{Id=parent,Host=host};
    }
-   throw new IOException("线程的主线程关联层级过深，无法跳转。");
+   throw new IOException(UiText.T("线程的主线程关联层级过深，无法跳转。","The parent conversation chain is too deep."));
   }
   public static bool UsesDesktopLink(Card card){return card!=null&&!string.IsNullOrEmpty(card.Host)&&card.Host!="local";}
   public static string DesktopLink(Card card){
    Guid id;
-   if(card==null||!Guid.TryParseExact(card.Id,"D",out id)||string.IsNullOrWhiteSpace(card.Host)||card.Host.Any(char.IsControl))throw new ArgumentException("线程链接信息不完整。");
+   if(card==null||!Guid.TryParseExact(card.Id,"D",out id)||string.IsNullOrWhiteSpace(card.Host)||card.Host.Any(char.IsControl))throw new ArgumentException(UiText.T("线程链接信息不完整。","Incomplete conversation link."));
    return "codex://threads/"+id.ToString("D")+"?hostId="+Uri.EscapeDataString(card.Host);
   }
   static void Launch(string link){using(var process=Process.Start(new ProcessStartInfo(link){UseShellExecute=true})){} }
@@ -178,7 +178,7 @@ namespace CodexStrip {
    var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)c.SetUnread((bool)J.Get(t,"isUnread"),readObservedAt);}
    foreach(var t in list){string host=J.Str(t,"hostId");if(host.Length==0)host="local";Cards[host+"/"+J.Str(t,"id")].NavigationMetadata(t);}
    // Explicitly tracked links remain discoverable even when the app list omits them.
-   foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title="正在读取线程"};try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
+   foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title=UiText.T("正在读取线程","Loading conversation")};try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
    Unavailable=J.Arr(J.Get(result,"unavailableHosts")).Length>0?"部分主机暂不可用":"";
    // Preserve last known remote cards when a host is disconnected.
    foreach(var k in Cards.Keys.ToArray())if(!keys.Contains(k)&&!Cards[k].Live){if(Unavailable.Length>0)Cards[k].Stale=true;else Cards.Remove(k);}
@@ -196,7 +196,7 @@ namespace CodexStrip {
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
   }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);if(Stream!=null)Stream.Watch(Cards.Values);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
   public async Task RefreshUsage(){if(refreshingUsage)return;refreshingUsage=true;try{Usage.Update(await Call("get_usage_limits",J.Obj(),15000));}catch{Usage.Error="额度暂不可读取";}finally{refreshingUsage=false;Changed();}}
-  public async Task Open(Card card){var target=ThreadNavigation.Resolve(card,Cards.Values);var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(target,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException("已请求切换线程，但 Windows 未允许激活 Codex 窗口。");Settings.Clicks[card.Key]=J.Now;
+  public async Task Open(Card card){var target=ThreadNavigation.Resolve(card,Cards.Values);var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(target,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException(UiText.T("已请求切换线程，但 Windows 未允许激活 Codex 窗口。","Conversation opened; activate the Codex window from the taskbar."));Settings.Clicks[card.Key]=J.Now;
    // Shell acceptance cannot confirm that a hosted conversation loaded. Its
    // desktop read receipt will clear completion markers during the next poll.
    if(target.Key==card.Key&&!ThreadNavigation.UsesDesktopLink(target)){Settings.PendingCompletions.Remove(card.Key);Card shown;if(Cards.TryGetValue(card.Key,out shown))shown.CompletionPending=false;}

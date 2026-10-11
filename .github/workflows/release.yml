@@ -29,16 +29,8 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.tag || github.ref_name }}
-      - name: Build Windows executable
-        run: ./source/build.ps1
-      - name: Verify executable
-        run: |
-          foreach ($test in @('--self-test','--settings-test')) {
-            $process = Start-Process -FilePath ./CodexStrip.exe -ArgumentList $test -WindowStyle Hidden -PassThru -Wait
-            if ($process.ExitCode -ne 0) { throw "$test failed: $($process.ExitCode)" }
-          }
-      - name: Package portable downloads
-        run: ./source/package.ps1
+      - name: Build and verify Chinese and English packages
+        run: ./source/package.ps1 -Language all
       - name: Publish release and downloads
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,5 +42,5 @@ jobs:
             gh release create $env:RELEASE_TAG --verify-tag --title "Codex Strip $env:RELEASE_TAG" --notes-file dist/RELEASE_NOTES.md
             if ($LASTEXITCODE -ne 0) { throw 'Release creation failed' }
           }
-          gh release upload $env:RELEASE_TAG CodexStrip.exe CodexStrip.exe.config dist/CodexStrip-portable.zip dist/SHA256SUMS.txt --clobber
+          gh release upload $env:RELEASE_TAG dist/CodexStrip-portable-zh-CN.zip dist/CodexStrip-portable-en.zip dist/SHA256SUMS.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }

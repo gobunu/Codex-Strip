@@ -11,19 +11,19 @@ A task status bar for Codex on Windows, with horizontal and vertical layouts for
 ### Task board
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="screenshots/tasks-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="screenshots/tasks-light.png">
-  <img src="screenshots/tasks-light.png" alt="Task board showing hosts, task titles, latest progress, status, and remaining weekly usage" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/tasks-dark-en.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/tasks-light-en.png">
+  <img src="screenshots/tasks-light-en.png" alt="Task board showing hosts, task titles, latest progress, status, and remaining weekly usage" width="100%">
 </picture>
 
-Displays each task's host, status, latest message, and remaining weekly usage. Completion indicators follow Codex's read state. The screenshots use sample data and show both light and dark themes.
+Displays each task's host, status, latest message, and remaining weekly usage. Completion indicators follow Codex's read state.
 
 ### Resource monitor
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="screenshots/resources-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="screenshots/resources.png">
-  <img src="screenshots/resources.png" alt="Idle resource view showing CPU, GPU, and memory usage, plus network and disk speed charts" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/resources-dark-en.png">
+  <source media="(prefers-color-scheme: light)" srcset="screenshots/resources-en.png">
+  <img src="screenshots/resources-en.png" alt="Idle resource view showing CPU, GPU, and memory usage, plus network and disk speed charts" width="100%">
 </picture>
 
 Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks are running or awaiting input, it can open automatically after a configurable delay. New tasks, questions, or unread results bring the task board back.
@@ -44,7 +44,7 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 
 **Requirements:** Windows, .NET Framework 4.8, and a running Codex desktop app.
 
-1. Download `CodexStrip-portable.zip` from the [latest release](https://github.com/gobunu/Codex-Strip/releases/latest) and extract it.
+1. Download `CodexStrip-portable-en.zip` from the [latest release](https://github.com/gobunu/Codex-Strip/releases/latest) and extract it. The Chinese build is available as `CodexStrip-portable-zh-CN.zip`.
 2. Open the Codex desktop app, then run `CodexStrip.exe`. Keep `CodexStrip.exe.config` in the same folder.
 3. Choose your monitor, dock position, number of visible tasks, and interface scale in Settings.
 
@@ -55,7 +55,7 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 | Action | Result |
 | :--- | :--- |
 | Click / right-click a task card | Open the conversation / preview its messages |
-| Click the remaining weekly usage indicator | View usage limit details |
+| Click **Weekly left** | View usage limit details |
 | `F11` / `Esc` | Toggle fullscreen / exit fullscreen and restore the previous position |
 | Click the idle resource view | Return to the task board |
 | Click the top bar's minimize button | Minimize to the system tray |
@@ -65,11 +65,16 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 Run in Windows PowerShell:
 
 ```powershell
-./source/build.ps1
+./source/build.ps1 -Language en
 ./CodexStrip.exe --self-test
 ./CodexStrip.exe --settings-test
-./source/package.ps1
+./source/package.ps1 -Language all
 ```
+
+| Script | Language options |
+| :--- | :--- |
+| `build.ps1 -Language` | `zh-CN` (default) or `en` |
+| `package.ps1 -Language` | `zh-CN`, `en`, or `all` (default; creates both packages) |
 
 `source/tests/` contains development checks for reading the desktop API, conversation navigation, temporary-to-main thread links, settings, layout, idle behavior, and resource display. Some tests interact with windows or temporarily reserve part of the screen's work area.
 

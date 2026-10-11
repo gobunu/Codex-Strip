@@ -10,13 +10,13 @@ namespace CodexStrip {
   readonly System.Drawing.Icon artwork;
   bool disposed;
   public TrayHost(StripWindow w){window=w;artwork=System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location);menu=new Forms.ContextMenuStrip();
-   menu.Items.Add("显示／隐藏看板",null,delegate{Toggle();});
-   menu.Items.Add("立即进入静息",null,delegate{Show();window.ShowSleepMonitor();});
-   menu.Items.Add("账户额度",null,delegate{Show();window.ShowUsage();});
-   menu.Items.Add("设置",null,delegate{Show();window.ShowSettings();});
+   menu.Items.Add(UiText.T("显示／隐藏看板","Show / hide dashboard"),null,delegate{Toggle();});
+   menu.Items.Add(UiText.T("立即进入静息","Open idle monitor"),null,delegate{Show();window.ShowSleepMonitor();});
+   menu.Items.Add(UiText.T("账户额度","Account usage"),null,delegate{Show();window.ShowUsage();});
+   menu.Items.Add(UiText.T("设置","Settings"),null,delegate{Show();window.ShowSettings();});
    menu.Items.Add(new Forms.ToolStripSeparator());
-   menu.Items.Add("退出 Codex Strip",null,delegate{Exit();});
-   icon=new Forms.NotifyIcon{Icon=artwork,Text="Codex Strip · 点击显示／隐藏",ContextMenuStrip=menu,Visible=true};
+   menu.Items.Add(UiText.T("退出 Codex Strip","Quit Codex Strip"),null,delegate{Exit();});
+   icon=new Forms.NotifyIcon{Icon=artwork,Text=UiText.T("Codex Strip · 点击显示／隐藏","Codex Strip · Click to show / hide"),ContextMenuStrip=menu,Visible=true};
    icon.MouseClick+=(s,e)=>{if(e.Button==Forms.MouseButtons.Left)Toggle();};
    window.TrayMode=true;window.StateChanged+=OnStateChanged;window.Closed+=OnClosed;
   }
