@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $outputDir = Join-Path $root 'dist'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
-$files = @('CodexStrip.exe','CodexStrip.exe.config','README.md','使用说明.md','RELEASE_NOTES.md','THIRD_PARTY_NOTICES.txt')
+$files = @('CodexStrip.exe','CodexStrip.exe.config','README.md','README.en.md','使用说明.md','USER_GUIDE.en.md','RELEASE_NOTES.md','THIRD_PARTY_NOTICES.txt')
 $paths = $files | ForEach-Object { Join-Path $root $_ }
 foreach ($path in $paths) {
   if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package file: $path" }

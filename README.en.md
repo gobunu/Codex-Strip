@@ -4,7 +4,7 @@
 
 A task status bar for Codex on Windows, with horizontal and vertical layouts for secondary displays. Shows task progress, requests for input, and usage limits. When idle, it can switch to system resource monitoring.
 
-[Download portable version](https://github.com/gobunu/Codex-Strip/releases/latest) · [User guide (Chinese)](使用说明.md) · [Report an issue](https://github.com/gobunu/Codex-Strip/issues)
+[Download portable version](https://github.com/gobunu/Codex-Strip/releases/latest) · [User guide](USER_GUIDE.en.md) · [Report an issue](https://github.com/gobunu/Codex-Strip/issues)
 
 ## Screenshots
 
@@ -79,5 +79,5 @@ Run in Windows PowerShell:
 | :--- | :--- |
 | `source/` | C# source, build scripts, and development checks |
 | `assets/`, `screenshots/` | Icons and example screenshots |
-| [使用说明.md](使用说明.md) | Detailed features, configuration, and known limitations (Chinese) |
+| [USER_GUIDE.en.md](USER_GUIDE.en.md) | Detailed features, configuration, and controls |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | Version changes |
