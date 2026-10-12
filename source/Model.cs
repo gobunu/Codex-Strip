@@ -203,18 +203,21 @@ namespace CodexStrip {
    // Work only on detached cards; readers keep the last complete snapshot.
    var Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());bool Connected=this.Connected;string Connection=this.Connection,Unavailable=this.Unavailable;
    try {
-   double readObservedAt=UnreadClock.Next();object result=await Call("list_threads",J.Obj("limit",50));var listedUnread=new Dictionary<string,bool>();
+   // Desktop host enumeration can take 30 seconds before reporting an offline host.
+   double readObservedAt=UnreadClock.Next();object result=await Call("list_threads",J.Obj("limit",50),45000);var listedUnread=new Dictionary<string,bool>();
+   var unavailableHosts=new HashSet<string>(J.Arr(J.Get(result,"unavailableHosts")).Select(h=>J.Str(h,"hostId")).Where(h=>h.Length>0));
    var list=J.Arr(J.Get(result,"pinnedThreads")).Concat(J.Arr(J.Get(result,"threads"))).Where(t=>J.Str(t,"kind")=="codex").ToArray();
    var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)listedUnread[key]=(bool)J.Get(t,"isUnread");}
    foreach(var t in list){string host=J.Str(t,"hostId");if(host.Length==0)host="local";Cards[host+"/"+J.Str(t,"id")].NavigationMetadata(t);}
    // Explicitly tracked links remain discoverable even when the app list omits them.
-   foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title=UiText.T("正在读取线程","Loading conversation")};try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
+   foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title=UiText.T("正在读取线程","Loading conversation")};if(unavailableHosts.Contains(c.Host)){Cards[key]=c;keys.Add(key);c.Stale=true;continue;}try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
    Unavailable=J.Arr(J.Get(result,"unavailableHosts")).Length>0?"部分主机暂不可用":"";
    // Preserve last known remote cards when a host is disconnected.
    foreach(var k in Cards.Keys.ToArray())if(!keys.Contains(k)&&!Cards[k].Live){if(Unavailable.Length>0)Cards[k].Stale=true;else Cards.Remove(k);}
+   foreach(var c in Cards.Values)if(unavailableHosts.Contains(c.Host))c.Stale=true;
    Connected=true;Connection="已连接 Codex";
    // wait_threads must not wait on its own routing task. Read that one directly.
-   var targets=Cards.Values.Where(c=>keys.Contains(c.Key)&&c.Id!=Bridge.ContextId).ToArray();
+   var targets=Cards.Values.Where(c=>keys.Contains(c.Key)&&c.Id!=Bridge.ContextId&&!unavailableHosts.Contains(c.Host)).ToArray();
    for(int start=0;start<targets.Length;start+=8){var group=targets.Skip(start).Take(8).ToArray();try {
     var snapshot=await Call("wait_threads",J.Obj("targets",group.Select(c=>Target(c)).ToArray(),"timeoutMs",0),15000);
     var seen=new HashSet<string>();foreach(var p in J.Arr(J.Get(snapshot,"polls"))){var th=J.Get(p,"thread");string key=J.Str(th,"hostId")+"/"+J.Str(th,"id");Card c;if(Cards.TryGetValue(key,out c)){c.Snapshot(p);seen.Add(key);}}
@@ -222,7 +225,7 @@ namespace CodexStrip {
     // Absence is not a disconnect: fetch missing targets individually.
     await Task.WhenAll(group.Where(c=>!seen.Contains(c.Key)).Select(async c=>{try{var single=await Call("wait_threads",J.Obj("targets",new[]{Target(c)},"timeoutMs",0),15000);var polls=J.Arr(J.Get(single,"polls"));if(polls.Length>0)c.Snapshot(polls[0]);else c.Stale=true;}catch{c.Stale=true;}}));
    }catch{foreach(var c in group)c.Stale=true;}}
-   foreach(var c in Card.Sort(Cards.Values,Settings).Concat(Cards.Values.Where(c=>c.Status=="active"||c.Id==Bridge.ContextId)).Distinct()){if(J.Now-c.DetailFetched<5&&c.Message.Length>0)continue;try {c.Detail(await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000));}catch{c.DetailFetched=J.Now;}}
+   foreach(var c in Card.Sort(Cards.Values,Settings).Concat(Cards.Values.Where(c=>c.Status=="active"||c.Id==Bridge.ContextId)).Distinct()){if(unavailableHosts.Contains(c.Host)||J.Now-c.DetailFetched<5&&c.Message.Length>0)continue;try {c.Detail(await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000));}catch{c.DetailFetched=J.Now;}}
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}
    // Bind a successful list observation after polling has identified its current turn.
    foreach(var entry in listedUnread){Card c;if(!Cards.TryGetValue(entry.Key,out c))continue;Card observation;
@@ -230,6 +233,7 @@ namespace CodexStrip {
     c.MergeUnread(observation);
    }
    LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
+  }catch(TimeoutException){Connected=this.Connected||(Stream!=null&&Stream.Connected);Connection="任务列表超时 · 正在重试";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;
   }catch(Exception){Connected=false;Connection="Codex 未连接 · 等待重连";Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());foreach(var c in Cards.Values)c.Stale=true;Bridge.Reset();}finally{MergeStream(Cards);UpdateCompletions(this.Cards,Cards);this.Cards=Cards;this.Connected=Connected;this.Connection=Connection;this.Unavailable=Unavailable;Refreshing=false;Changed();}}
   public async Task RefreshUsage(){if(refreshingUsage)return;refreshingUsage=true;try{Usage.Update(await Call("get_usage_limits",J.Obj(),15000));}catch{Usage.Error="额度暂不可读取";}finally{refreshingUsage=false;Changed();}}
   public async Task Open(Card card){var target=ThreadNavigation.Resolve(card,Cards.Values);var window=CodexForeground.Find();bool activated=CodexForeground.Activate(window);await ThreadNavigation.Open(target,Call);if(!activated&&!CodexForeground.Activate(window))throw new IOException(UiText.T("已请求切换线程，但 Windows 未允许激活 Codex 窗口。","Conversation opened; activate the Codex window from the taskbar."));Settings.Clicks[card.Key]=J.Now;

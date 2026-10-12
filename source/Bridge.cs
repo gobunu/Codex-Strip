@@ -50,7 +50,7 @@ namespace CodexStrip {
    if(PipeName==null)await Discover();
    if(ContextId==null)throw new IOException(UiText.T("未找到本地任务上下文，请在 Codex 中打开一个已有本地任务后重试。","Open an existing local conversation in Codex and try again."));
    // Desktop app tools require the originating surface for reads and navigation.
-   object result;try {result=await Rpc(PipeName,"tools/call",J.Obj("namespace","codex_app","tool",tool,"arguments",args,"threadId",ContextId,"turnId","mcp-turn-monitor-probe","callId","strip-"+Guid.NewGuid().ToString(),"callerSource","codex"),timeout);}catch(Exception e){throw new IOException(tool+": "+e.Message,e);}
+   object result;try {result=await Rpc(PipeName,"tools/call",J.Obj("namespace","codex_app","tool",tool,"arguments",args,"threadId",ContextId,"turnId","mcp-turn-monitor-probe","callId","strip-"+Guid.NewGuid().ToString(),"callerSource","codex"),timeout);}catch(TimeoutException e){throw new TimeoutException(tool+": "+e.Message,e);}catch(Exception e){throw new IOException(tool+": "+e.Message,e);}
    var content=J.Arr(J.Get(result,"contentItems"));
    if(!object.Equals(J.Get(result,"success"),true))throw new IOException(string.Join(" ",content.Select(c=>J.Str(c,"text"))));
    foreach(var c in content){string text=J.Str(c,"text");if(text.Length>0){try{return J.Parse(text);}catch{return J.Obj("text",text);}}}
@@ -58,16 +58,18 @@ namespace CodexStrip {
   }
   async Task<object> Rpc(string pipe,string method,object parameters,int timeout) {
    using(var s=new NamedPipeClientStream(".",pipe,PipeDirection.InOut,PipeOptions.Asynchronous)) {
-    await Task.Run(()=>s.Connect(Math.Min(timeout,2000)));
+    try{await Task.Run(()=>s.Connect(Math.Min(timeout,2000)));}catch(TimeoutException e){throw new IOException("Codex pipe connection timed out",e);}
     using(var cts=new CancellationTokenSource(timeout)) {
      // Dispose on timeout as named-pipe cancellation is not reliable on every Windows build.
      using(cts.Token.Register(()=>{try{s.Dispose();}catch{}})) {
+      try {
       int id=Interlocked.Increment(ref nextId);byte[] p=Encoding.UTF8.GetBytes(J.Json(J.Obj("jsonrpc","2.0","id",id,"method",method,"params",parameters)));
       byte[] head=BitConverter.GetBytes(p.Length);await s.WriteAsync(head,0,4,cts.Token);await s.WriteAsync(p,0,p.Length,cts.Token);await s.FlushAsync(cts.Token);
       byte[] h=await Read(s,4,cts.Token);int n=BitConverter.ToInt32(h,0);if(n<1||n>8*1024*1024)throw new IOException("Invalid frame length");
       object response=J.Parse(Encoding.UTF8.GetString(await Read(s,n,cts.Token)));
       if(J.Get(response,"error")!=null)throw new IOException(J.Str(J.Get(response,"error"),"message"));
       return J.Get(response,"result");
+      }catch(Exception e){if(cts.IsCancellationRequested)throw new TimeoutException("Codex request timed out ("+timeout+" ms)",e);throw;}
      }
     }
    }

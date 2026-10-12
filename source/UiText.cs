@@ -12,6 +12,7 @@ namespace CodexStrip {
    {"正在连接 Codex…","Connecting to Codex…"},
    {"已连接 Codex","Connected to Codex"},
    {"Codex 未连接 · 等待重连","Codex disconnected · Reconnecting"},
+   {"任务列表超时 · 正在重试","Conversation list timed out · Retrying"},
    {"部分主机暂不可用","Some hosts are unavailable"},
    {"正在读取线程","Loading conversation"},
    {"额度暂不可读取","Usage limits unavailable"},
