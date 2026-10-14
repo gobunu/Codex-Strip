@@ -15,6 +15,7 @@ $buildArgs += @("/win32icon:$root\assets\app.ico","/resource:$root\assets\icon.p
 $buildArgs += $refs | ForEach-Object { '/r:' + $_ }
 $buildArgs += "$PSScriptRoot\InsetPanels.cs"
 $buildArgs += "$PSScriptRoot\SleepMode.cs"
+$buildArgs += "$PSScriptRoot\SleepDiagnostics.cs"
 $buildArgs += "$PSScriptRoot\GlassBackdrop.cs"
 $buildArgs += "$PSScriptRoot\SystemMetrics.cs"
 $buildArgs += "$PSScriptRoot\WindowBehavior.cs"
