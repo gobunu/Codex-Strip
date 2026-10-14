@@ -57,7 +57,7 @@ class AutoSleepTest {
   historical.Status="active";Age(window,61);window.EvaluateSleep();Check(!window.Sleeping,"hidden stale active card allowed sleep");
   historical.Status="notLoaded";historical.QuestionPending=true;Age(window,61);window.EvaluateSleep();Check(!window.Sleeping,"hidden pending question allowed sleep");
   historical.QuestionPending=false;
-  foreach(string state in new[]{"idle","completed","interrupted"}){historical.Status=state;Age(window,61);window.EvaluateSleep();Check(window.Sleeping,"stale historical "+state+" card prevented automatic sleep");window.WakeSleep();}
+  foreach(string state in new[]{"idle","completed","interrupted","failed"}){historical.Status=state;Age(window,61);window.EvaluateSleep();Check(window.Sleeping,"stale historical "+state+" card prevented automatic sleep");window.WakeSleep();}
   historical.Status="completed";historical.Unread=true;Age(window,61);window.EvaluateSleep();Check(!window.Sleeping,"stale unread result allowed sleep");historical.Unread=false;
   historical.CompletionPending=true;Age(window,61);window.EvaluateSleep();Check(!window.Sleeping,"stale pending completion allowed sleep");historical.CompletionPending=false;
   window.Engine.Cards.Remove(historical.Key);ExpectSleep(window);

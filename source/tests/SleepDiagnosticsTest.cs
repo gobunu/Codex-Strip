@@ -19,10 +19,10 @@ class SleepDiagnosticsTest {
  static SleepDiagnostic Diagnostic(Card[] cards,DateTime since,DateTime now,IEnumerable<string> keywords=null){return SleepDiagnostic.Create(true,cards,true,false,false,since,now,3,keywords);}
  static void Logic(){
   var now=new DateTime(2026,10,14,12,0,0,DateTimeKind.Utc);var quiet=new Card{Id="quiet",Host="local",Title="Finished task",Status="completed"};
-  foreach(string state in new[]{"completed","idle","notLoaded","interrupted"}){
+  foreach(string state in new[]{"completed","idle","notLoaded","interrupted","failed"}){
    quiet.Status=state;Check(SleepPolicy.Quiet(true,new[]{quiet}),state+" changed quiet policy");Check(Diagnostic(new[]{quiet},now,now).Blockers.Length==0,state+" became a diagnostic blocker");
   }
-  foreach(string state in new[]{"active","reconnecting","input","approval","failed","systemError","unknown",null}){
+  foreach(string state in new[]{"active","reconnecting","input","approval","systemError","unknown",null}){
    var c=quiet.Copy();c.Status=state;var d=Diagnostic(new[]{c},now,now);Check(!SleepPolicy.Quiet(true,new[]{c})&&d.Blockers.Length==1&&!d.RemainingSeconds.HasValue,"missing blocker for "+state);
   }
   quiet.Status="completed";quiet.Unread=true;quiet.CompletionPending=true;quiet.QuestionPending=true;
@@ -48,9 +48,15 @@ class SleepDiagnosticsTest {
   hb.Title=null;Check(!SleepPolicy.Quiet(true,new[]{hb},keywords),"null title was ignored");
   hb.Title="HB nightly";hb.Status="completed";hb.Unread=true;hb.CompletionPending=true;hb.QuestionPending=true;
   Check(SleepPolicy.Quiet(true,new[]{hb},keywords),"ignored attention still blocked sleep");Check(hb.Unread&&hb.CompletionPending&&hb.QuestionPending,"ignore mutated attention state");
-  var foreign=new Card{Id="hidden",Host="durable",Title="Hidden blocker",Status="failed"};var both=Diagnostic(new[]{hb,foreign},now,now,keywords);
+  var foreign=new Card{Id="hidden",Host="durable",Title="Hidden blocker",Status="approval"};var both=Diagnostic(new[]{hb,foreign},now,now,keywords);
   Check(both.Blockers.Length==1&&both.Blockers[0].Card==foreign&&both.Ignored.Length==1,"ignored thread hid unrelated blocker");
+  var failed=new Card{Id="ended-failure",Host="remote-ssh-discovered:example",Title="Ended task"};
+  failed.Snapshot(J.Obj("thread",J.Obj("status",J.Obj("type","idle")),"latestTurn",J.Obj("id","failed-turn","status","failed","error",J.Obj("message","stream disconnected before completion"))));
+  Check(failed.Status=="failed"&&failed.LastError.Length>0,"failed-turn fixture did not retain its error");Check(SleepPolicy.Quiet(true,new[]{failed})&&Diagnostic(new[]{failed},now,now).RemainingSeconds==180,"ended failed turn still blocked countdown");
+  failed.Stale=true;Check(SleepPolicy.Quiet(true,new[]{failed}),"stale terminal failure prevented sleep");failed.QuestionPending=true;Check(!SleepPolicy.Quiet(true,new[]{failed}),"explicit pending question was suppressed by failure");failed.QuestionPending=false;
   var w=new StripWindow();try{
+   Check(!w.Config.SleepDebug,"debug enabled by default");w.ShowSleepDebug();Check(!w.PanelOpen,"disabled Debug could still open");
+   w.SetSleepDebugEnabled(true);Check(Settings.Load().SleepDebug,"debug enable did not persist");w.ShowSleepDebug();Check(w.PanelOpen,"enabled Debug did not open");w.SetSleepDebugEnabled(false);Check(!w.PanelOpen&&!Settings.Load().SleepDebug,"debug disable did not close panel or persist");
    w.Config.Count=1;w.Config.Host="local";w.Config.SleepAuto=true;w.Config.SleepIdleMinutes=1;w.Config.SleepIgnoreKeywords=keywords;w.Engine.Connected=true;
    hb.Status="active";hb.TurnId="one";w.Engine.Cards[hb.Key]=hb;w.Engine.Cards[quiet.Key]=quiet;
    w.WakeSleep();Age(w,61);w.EvaluateSleep();Check(w.Sleeping,"ignored hidden remote thread prevented automatic sleep");
@@ -63,6 +69,7 @@ class SleepDiagnosticsTest {
    Check(Field<DateTime>(w,"quietSince")==since,"render reset countdown");Check(w.CurrentSleepDiagnostic().RemainingSeconds<=35,"countdown ignored elapsed time");
    typeof(StripWindow).GetMethod("RecordSleepInteraction",Private).Invoke(w,new object[0]);w.EvaluateSleep();Check(w.CurrentSleepDiagnostic().RemainingSeconds==60,"interaction did not reset countdown");
    var saved=File.ReadAllText(Path.Combine(Settings.DataDir,"sleep-state.json"));Check(J.Num(J.Parse(saved),"remainingSeconds")==60,"local diagnostic did not update seconds");Check(!saved.Contains(hb.Id)&&!saved.Contains(hb.Title),"local diagnostic saved conversation details");
+   w.Engine.Cards[failed.Key]=failed;Age(w,61);w.EvaluateSleep();Check(w.Sleeping&&failed.Status=="failed"&&failed.LastError.Length>0,"ended error blocked sleep or was erased");w.WakeSleep();
    w.Config.SleepIgnoreKeywords=SleepDiagnostic.ParseKeywords("hb, timer");w.Save();Check(Settings.Load().SleepIgnoreKeywords.SequenceEqual(new[]{"hb","timer"}),"ignore rules did not survive reload");
   }finally{w.Close();}
  }
@@ -73,10 +80,15 @@ class SleepDiagnosticsTest {
   var card=new Card{Id="example-running",Host="local",Title=UiText.T("模型评测与结果整理","Evaluate model and collect results"),Status="active"};w.Engine.Cards[card.Key]=card;
   var hidden=new Card{Id="example-hidden",Host="durable",Title=UiText.T("远端环境配置","Configure remote environment"),Status="approval",Stale=true};w.Engine.Cards[hidden.Key]=hidden;
   var hb=new Card{Id="example-hb",Host="local",Title="hb · monitor",Status="active"};w.Engine.Cards[hb.Key]=hb;
-  w.Render();w.ShowSleepDebug();await Settle(w);Check(w.CurrentSleepDiagnostic().Blockers.Length==2,"debug lost hidden blocker");
+  w.Render();await Settle(w);Check(!w.Config.SleepDebug&&Field<FrameworkElement>(w,"idleStatusRow").Visibility==Visibility.Collapsed&&Field<RowDefinition>(w,"idleStatusRowDefinition").Height.Value==0,"debug was visible on default dashboard");
+  double normalHeight=Field<Grid>(w,"bodyGrid").ActualHeight;w.Snapshot(Path.Combine(output,"debug-off-dashboard.png"));w.ShowSettings();await Settle(w);
+  var settings=Field<InsetPanel>(w,"activePanel");var toggleRow=Children<Grid>(settings).Single(g=>g.Children.OfType<TextBlock>().Any(t=>t.Text==UiText.T("静息调试","Idle Debug")));
+  Children<Button>(toggleRow).Single().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));await Settle(w);
+  Check(w.Config.SleepDebug&&Field<FrameworkElement>(w,"idleStatusRow").Visibility==Visibility.Visible,"settings toggle did not enable Debug");Check(Math.Abs(normalHeight-Field<Grid>(w,"bodyGrid").ActualHeight-24)<1,"debug row did not reserve its exact height");w.Snapshot(Path.Combine(output,"debug-enabled-settings.png"));
+  w.ClosePanel();w.ShowSleepDebug();await Settle(w);Check(w.CurrentSleepDiagnostic().Blockers.Length==2,"debug lost hidden blocker");
   var panel=Field<InsetPanel>(w,"activePanel");Bounds(panel,w,"wide Debug panel");Bounds(Field<TextBlock>(w,"idleStatus"),w,"wide countdown");
-  var input=Children<TextBox>(panel).Single();input.Text="hb，timer";Children<Button>(panel).Single(b=>object.Equals(b.Content,UiText.T("应用","Apply"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-  Check(w.Config.SleepIgnoreKeywords.SequenceEqual(new[]{"hb","timer"}),"Apply did not update ignore rules");Check(Settings.Load().SleepIgnoreKeywords.SequenceEqual(new[]{"hb","timer"}),"Apply did not save rules");
+  var input=Children<TextBox>(panel).Single();input.Text="hb，scheduler";Children<Button>(panel).Single(b=>object.Equals(b.Content,UiText.T("应用","Apply"))).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+  Check(w.Config.SleepIgnoreKeywords.SequenceEqual(new[]{"hb","scheduler"}),"Apply did not update ignore rules");Check(input.Text=="hb, scheduler","Apply did not normalize input");
   var first=Children<TextBox>(panel).Single();for(int i=0;i<5;i++)w.EvaluateSleep();Check(object.ReferenceEquals(first,Children<TextBox>(panel).Single()),"automatic refresh rebuilt keyword editor");
   w.Snapshot(Path.Combine(output,"debug-blockers-wide.png"));
   card.Status="completed";hidden.Status="idle";Age(w,45);w.EvaluateSleep();var start=Field<DateTime>(w,"quietSince");var before=w.CurrentSleepDiagnostic().RemainingSeconds;
@@ -85,6 +97,8 @@ class SleepDiagnosticsTest {
   w.Width=480;w.Height=900;await Settle(w);Bounds(Field<InsetPanel>(w,"activePanel"),w,"portrait Debug panel");Bounds(Field<TextBlock>(w,"idleStatus"),w,"portrait countdown");w.Snapshot(Path.Combine(output,"debug-countdown-portrait.png"));
   w.SetTheme("dark");await Settle(w);w.Snapshot(Path.Combine(output,"debug-countdown-dark.png"));w.SetTheme("light");
   w.Width=480;w.Height=315;w.Config.UiScale=1.5;w.ApplyTheme();await Settle(w);Bounds(Field<InsetPanel>(w,"activePanel"),w,"minimum Debug panel");Bounds(Field<TextBlock>(w,"idleStatus"),w,"minimum countdown");w.Snapshot(Path.Combine(output,"debug-minimum.png"));
+  w.SetSleepDebugEnabled(false);await Settle(w);Check(!w.PanelOpen&&Field<FrameworkElement>(w,"idleStatusRow").Visibility==Visibility.Collapsed&&Field<RowDefinition>(w,"idleStatusRowDefinition").Height.Value==0,"disabling Debug left its panel or row visible");w.Snapshot(Path.Combine(output,"debug-off-minimum.png"));
+  w.ShowSettings();await Settle(w);Check(!Children<Button>(Field<InsetPanel>(w,"activePanel")).Any(b=>object.Equals(b.Content,UiText.T("查看静息 Debug","Open idle Debug"))),"disabled Debug retained its settings entry");w.Snapshot(Path.Combine(output,"debug-disabled-settings.png"));
  }
  [STAThread]static int Main(string[] args){StripWindow w=null;try{
   string output=Path.GetFullPath(args[0]);Directory.CreateDirectory(output);Settings.DataDir=Path.Combine(output,"data");

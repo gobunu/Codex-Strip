@@ -31,12 +31,12 @@ namespace CodexStrip {
      if(card.Unread)reasons.Add("unread_result");
      if(card.CompletionPending)reasons.Add("completion_pending");
      break;
-    case "idle":case "notLoaded":case "interrupted":break;
+    case "idle":case "notLoaded":case "interrupted":case "failed":break;
     case "active":reasons.Add("running_task");break;
     case "reconnecting":reasons.Add("reconnecting");break;
     case "input":reasons.Add("waiting_input");break;
     case "approval":reasons.Add("waiting_approval");break;
-    case "failed":case "systemError":reasons.Add("error");break;
+    case "systemError":reasons.Add("error");break;
     default:reasons.Add("unknown_status");break;
    }
    return reasons.ToArray();
@@ -77,19 +77,23 @@ namespace CodexStrip {
  }
 
  public partial class StripWindow {
-  TextBlock idleStatus;
+  TextBlock idleStatus;FrameworkElement idleStatusRow;RowDefinition idleStatusRowDefinition;
+  double TaskBodyHeight {get{return Math.Max(0,UiHeight-(Config.SleepDebug?80:56));}}
   public SleepDiagnostic CurrentSleepDiagnostic(){return SleepDiagnostic.Create(Engine.Connected,Engine.Cards.Values,Config.SleepAuto,sleeping,manualSleepCards!=null,quietSince,DateTime.UtcNow,Config.SleepIdleMinutes,Config.SleepIgnoreKeywords);}
   FrameworkElement BuildSleepStatusRow(){
    var row=new DockPanel{LastChildFill=true,Margin=new Thickness(0,0,0,4)};
    var debug=Design.Button(UiText.T("静息 Debug","Idle Debug"));debug.MinHeight=20;debug.Padding=new Thickness(6,0,6,0);debug.FontSize=11;debug.Foreground=Design.B(Design.Accent);debug.ToolTip=UiText.T("查看阻止静息的线程和倒计时","Inspect idle blockers and countdown");debug.Click+=delegate{ShowSleepDebug();};DockPanel.SetDock(debug,Dock.Right);row.Children.Add(debug);
-   idleStatus=Design.Text("",11,Design.Muted);row.Children.Add(idleStatus);UpdateSleepDiagnostics();return row;
+   idleStatus=Design.Text("",11,Design.Muted);row.Children.Add(idleStatus);idleStatusRow=row;UpdateSleepDiagnostics();return row;
   }
   void UpdateSleepDiagnostics(){
    var diagnostic=CurrentSleepDiagnostic();
+   if(idleStatusRow!=null)idleStatusRow.Visibility=Config.SleepDebug?Visibility.Visible:Visibility.Collapsed;
+   if(idleStatusRowDefinition!=null)idleStatusRowDefinition.Height=new GridLength(Config.SleepDebug?24:0);
    if(idleStatus!=null){idleStatus.Text=diagnostic.Summary;idleStatus.ToolTip=diagnostic.Summary;}
    var panel=activePanel as SleepDebugPanel;if(panel!=null)panel.Update(diagnostic);
   }
-  public void ShowSleepDebug(){if(sleeping)WakeSleep();if(activePanel is SleepDebugPanel){ClosePanel();return;}usageWindow=null;settingsWindow=null;new SleepDebugPanel(this).Show();}
+  public void SetSleepDebugEnabled(bool enabled){Config.SleepDebug=enabled;if(!enabled&&activePanel is SleepDebugPanel)ClosePanel();Save();UpdateSleepDiagnostics();ResizePanels();RenderCards();}
+  public void ShowSleepDebug(){if(!Config.SleepDebug)return;if(sleeping)WakeSleep();if(activePanel is SleepDebugPanel){ClosePanel();return;}usageWindow=null;settingsWindow=null;new SleepDebugPanel(this).Show();}
  }
 
  public sealed class SleepIgnoreEditor:StackPanel {

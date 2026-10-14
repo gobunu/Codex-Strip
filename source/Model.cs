@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace CodexStrip {
  public sealed class Settings {
   public static readonly string[] SleepWidgetIds={"cpu","gpu","memory","network","disk"};
-  public bool SleepAuto=true,SleepRingCharts=true,SleepSmoothRings=true,SleepGlassRefraction=false;public int SleepIdleMinutes=5;public List<string> SleepWidgets=new List<string>(SleepWidgetIds);
+  public bool SleepDebug=false;public bool SleepAuto=true,SleepRingCharts=true,SleepSmoothRings=true,SleepGlassRefraction=false;public int SleepIdleMinutes=5;public List<string> SleepWidgets=new List<string>(SleepWidgetIds);
   public List<string> SleepIgnoreKeywords=new List<string>();public string SleepWallpaperPath="",SleepAdapterId="",SleepSpeedUnit="auto",SleepAccent="blue";public double SleepDim=.4;
   public string ThemeMode="system"; public double UiScale=1.5,DefaultUiScale=1.5; public int Count=4; public bool Topmost=true; public string TopmostMode="always"; public bool ReserveWorkArea=true; public string DockEdge="top"; public string DockMonitor=""; public double DockHorizontalSize=286,DockVerticalSize=320; public string Host="all"; public double Width=1280,Height=286,Left=80,Top=80;
   public Dictionary<string,string> Watched=new Dictionary<string,string>();
@@ -48,7 +48,7 @@ namespace CodexStrip {
    if(J.Get(data,"sleepAuto")!=null)s.SleepAuto=!object.Equals(J.Get(data,"sleepAuto"),false);
    if(J.Get(data,"sleepRingCharts")!=null)s.SleepRingCharts=!object.Equals(J.Get(data,"sleepRingCharts"),false);
    if(J.Get(data,"sleepSmoothRings")!=null)s.SleepSmoothRings=!object.Equals(J.Get(data,"sleepSmoothRings"),false);
-   s.SleepIgnoreKeywords=SleepDiagnostic.ParseKeywords(string.Join(",",J.Arr(J.Get(data,"sleepIgnoreKeywords")).Select(Convert.ToString)));s.SleepGlassRefraction=object.Equals(J.Get(data,"sleepGlassRefraction"),true);
+   s.SleepDebug=object.Equals(J.Get(data,"sleepDebug"),true);s.SleepIgnoreKeywords=SleepDiagnostic.ParseKeywords(string.Join(",",J.Arr(J.Get(data,"sleepIgnoreKeywords")).Select(Convert.ToString)));s.SleepGlassRefraction=object.Equals(J.Get(data,"sleepGlassRefraction"),true);
    double minutes=J.Num(data,"sleepIdleMinutes");if(minutes>=1&&minutes<=60)s.SleepIdleMinutes=(int)minutes;
    var widgets=J.Arr(J.Get(data,"sleepWidgets")).Select(Convert.ToString).Where(SleepWidgetIds.Contains).Distinct().ToList();if(widgets.Count>0)s.SleepWidgets=widgets;
    s.SleepWallpaperPath=ResolveWallpaperPath(J.Str(data,"sleepWallpaperPath"));s.SleepAdapterId=J.Str(data,"sleepAdapterId");
@@ -56,7 +56,7 @@ namespace CodexStrip {
    string accent=J.Str(data,"sleepAccent");if(new[]{"blue","green","orange","purple"}.Contains(accent))s.SleepAccent=accent;
    double dim=J.Num(data,"sleepDim");if(dim>=.15&&dim<=.85)s.SleepDim=dim;
   }
-  public void Save(){Directory.CreateDirectory(DataDir);var path=Path.Combine(DataDir,"settings.json");var tmp=path+".tmp";File.WriteAllText(tmp,J.Json(J.Obj("floatingRects",FloatingRects,"thicknesses",Thicknesses,"monitorScales",MonitorScales,"pendingCompletions",PendingCompletions,"theme",ThemeMode,"uiScale",DefaultUiScale,"count",Count,"topmost",Topmost,"topmostMode",TopmostMode,"reserveWorkArea",ReserveWorkArea,"dockEdge",DockEdge,"dockMonitor",DockMonitor,"dockHorizontalSize",DockHorizontalSize,"dockVerticalSize",DockVerticalSize,"host",Host,"width",Width,"height",Height,"left",Left,"top",Top,"clicks",Clicks,"watched",Watched,"sleepIgnoreKeywords",SleepIgnoreKeywords.ToArray(),"sleepAuto",SleepAuto,"sleepRingCharts",SleepRingCharts,"sleepSmoothRings",SleepSmoothRings,"sleepGlassRefraction",SleepGlassRefraction,"sleepIdleMinutes",SleepIdleMinutes,"sleepWidgets",SleepWidgets.ToArray(),"sleepWallpaperPath",SavedWallpaperPath(),"sleepAdapterId",SleepAdapterId,"sleepSpeedUnit",SleepSpeedUnit,"sleepAccent",SleepAccent,"sleepDim",SleepDim)));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
+  public void Save(){Directory.CreateDirectory(DataDir);var path=Path.Combine(DataDir,"settings.json");var tmp=path+".tmp";File.WriteAllText(tmp,J.Json(J.Obj("floatingRects",FloatingRects,"thicknesses",Thicknesses,"monitorScales",MonitorScales,"pendingCompletions",PendingCompletions,"theme",ThemeMode,"uiScale",DefaultUiScale,"count",Count,"topmost",Topmost,"topmostMode",TopmostMode,"reserveWorkArea",ReserveWorkArea,"dockEdge",DockEdge,"dockMonitor",DockMonitor,"dockHorizontalSize",DockHorizontalSize,"dockVerticalSize",DockVerticalSize,"host",Host,"width",Width,"height",Height,"left",Left,"top",Top,"clicks",Clicks,"watched",Watched,"sleepDebug",SleepDebug,"sleepIgnoreKeywords",SleepIgnoreKeywords.ToArray(),"sleepAuto",SleepAuto,"sleepRingCharts",SleepRingCharts,"sleepSmoothRings",SleepSmoothRings,"sleepGlassRefraction",SleepGlassRefraction,"sleepIdleMinutes",SleepIdleMinutes,"sleepWidgets",SleepWidgets.ToArray(),"sleepWallpaperPath",SavedWallpaperPath(),"sleepAdapterId",SleepAdapterId,"sleepSpeedUnit",SleepSpeedUnit,"sleepAccent",SleepAccent,"sleepDim",SleepDim)));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
  }
  public enum UnreadSource { Persisted, List, CachedSummary, Stream, Authoritative }
  static class UnreadClock {
