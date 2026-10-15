@@ -22,7 +22,11 @@ namespace CodexStrip {
   public int IdleMinutes;
   public bool Connected;
   public static List<string> ParseKeywords(string value){return (value??"").Split(new[]{',','，',';','；','\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(s=>s.Trim()).Where(s=>s.Length>0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();}
-  public static string IgnoredBy(Card card,IEnumerable<string> keywords){return (keywords??new string[0]).Select(s=>(s??"").Trim()).FirstOrDefault(s=>s.Length>0&&(card.Title??"").IndexOf(s,StringComparison.OrdinalIgnoreCase)>=0)??"";}
+  public static readonly string[] SourceIds={"durable","local","remote-ssh","remote-control"};
+  public static List<string> ParseSources(IEnumerable<string> values){return (values??new string[0]).Select(s=>(s??"").Trim().ToLowerInvariant()).Where(SourceIds.Contains).Distinct().ToList();}
+  public static string SourceId(string host){host=host??"";if(host.StartsWith("remote-ssh-discovered:",StringComparison.OrdinalIgnoreCase))return "remote-ssh";if(host.StartsWith("remote-control:",StringComparison.OrdinalIgnoreCase))return "remote-control";return host.ToLowerInvariant();}
+  public static string SourceLabel(string source){switch(source){case "durable":return UiText.T("云端任务（durable）","Cloud tasks (durable)");case "local":return UiText.T("本机","Local");case "remote-ssh":return UiText.T("SSH 远程","SSH remote");case "remote-control":return "Remote Control";default:return source;}}
+  public static string IgnoredBy(Card card,IEnumerable<string> keywords,IEnumerable<string> sources=null){string source=SourceId(card.Host);if(ParseSources(sources).Contains(source))return UiText.T("来源：","Source: ")+SourceLabel(source);return (keywords??new string[0]).Select(s=>(s??"").Trim()).FirstOrDefault(s=>s.Length>0&&(card.Title??"").IndexOf(s,StringComparison.OrdinalIgnoreCase)>=0)??"";}
   public static string[] BlockingReasons(Card card){
    var reasons=new List<string>();
    if(card.QuestionPending)reasons.Add("question_pending");
@@ -41,10 +45,11 @@ namespace CodexStrip {
    }
    return reasons.ToArray();
   }
-  public static SleepDiagnostic Create(bool connected,IEnumerable<Card> cards,bool autoEnabled,bool sleeping,bool manual,DateTime quietSince,DateTime now,int minutes,IEnumerable<string> ignoredKeywords=null){
+  public static SleepDiagnostic Create(bool connected,IEnumerable<Card> cards,bool autoEnabled,bool sleeping,bool manual,DateTime quietSince,DateTime now,int minutes,IEnumerable<string> ignoredKeywords=null,IEnumerable<string> ignoredSources=null){
    var all=cards.ToArray();var keywords=(ignoredKeywords??new string[0]).ToArray();
-   var ignored=all.Select(c=>new SleepIgnoreMatch{Card=c,Keyword=IgnoredBy(c,keywords)}).Where(b=>b.Keyword.Length>0).OrderBy(b=>b.Card.Key,StringComparer.Ordinal).ToArray();
-   var blockers=all.Where(c=>IgnoredBy(c,keywords).Length==0).Select(c=>new SleepBlocker{Card=c,Reasons=BlockingReasons(c)}).Where(b=>b.Reasons.Length>0).OrderBy(b=>b.Card.Host,StringComparer.Ordinal).ThenBy(b=>b.Card.Id,StringComparer.Ordinal).ToArray();
+   var sources=ParseSources(ignoredSources);
+   var ignored=all.Select(c=>new SleepIgnoreMatch{Card=c,Keyword=IgnoredBy(c,keywords,sources)}).Where(b=>b.Keyword.Length>0).OrderBy(b=>b.Card.Key,StringComparer.Ordinal).ToArray();
+   var blockers=all.Where(c=>IgnoredBy(c,keywords,sources).Length==0).Select(c=>new SleepBlocker{Card=c,Reasons=BlockingReasons(c)}).Where(b=>b.Reasons.Length>0).OrderBy(b=>b.Card.Host,StringComparer.Ordinal).ThenBy(b=>b.Card.Id,StringComparer.Ordinal).ToArray();
    string reason=sleeping?(manual?"manual_sleep":"sleeping"):!autoEnabled?"disabled":!connected?"disconnected":blockers.Any(b=>b.Reasons.Any(r=>r=="running_task"||r=="reconnecting"))?"running_task":blockers.Any(b=>b.Reasons.Any(r=>r=="question_pending"||r=="waiting_input"||r=="waiting_approval"))?"pending_request":blockers.Any(b=>b.Reasons.Any(r=>r=="unread_result"||r=="completion_pending"))?"unread_result":blockers.Length>0?"unknown_or_error":"counting_down";
    int delay=Math.Max(1,minutes);
    int? remaining=reason=="counting_down"?(int?)Math.Ceiling(Math.Max(0,delay*60-(quietSince==DateTime.MinValue?0:Math.Max(0,(now-quietSince).TotalSeconds)))):null;
@@ -79,7 +84,7 @@ namespace CodexStrip {
  public partial class StripWindow {
   TextBlock idleStatus;FrameworkElement idleStatusRow;RowDefinition idleStatusRowDefinition;
   double TaskBodyHeight {get{return Math.Max(0,UiHeight-(Config.SleepDebug?80:56));}}
-  public SleepDiagnostic CurrentSleepDiagnostic(){return SleepDiagnostic.Create(Engine.Connected,Engine.Cards.Values,Config.SleepAuto,sleeping,manualSleepCards!=null,quietSince,DateTime.UtcNow,Config.SleepIdleMinutes,Config.SleepIgnoreKeywords);}
+  public SleepDiagnostic CurrentSleepDiagnostic(){return SleepDiagnostic.Create(Engine.Connected,Engine.Cards.Values,Config.SleepAuto,sleeping,manualSleepCards!=null,quietSince,DateTime.UtcNow,Config.SleepIdleMinutes,Config.SleepIgnoreKeywords,Config.SleepIgnoreSources);}
   FrameworkElement BuildSleepStatusRow(){
    var row=new DockPanel{LastChildFill=true,Margin=new Thickness(0,0,0,4)};
    var debug=Design.Button(UiText.T("静息 Debug","Idle Debug"));debug.MinHeight=20;debug.Padding=new Thickness(6,0,6,0);debug.FontSize=11;debug.Foreground=Design.B(Design.Accent);debug.ToolTip=UiText.T("查看阻止静息的线程和倒计时","Inspect idle blockers and countdown");debug.Click+=delegate{ShowSleepDebug();};DockPanel.SetDock(debug,Dock.Right);row.Children.Add(debug);
@@ -99,12 +104,17 @@ namespace CodexStrip {
  public sealed class SleepIgnoreEditor:StackPanel {
   public SleepIgnoreEditor(StripWindow main){
    Margin=new Thickness(0,4,0,8);
+   var sourcesHeading=Design.Text(UiText.T("按来源忽略线程","Ignore conversations by source"),12);sourcesHeading.Margin=new Thickness(0,0,0,5);Children.Add(sourcesHeading);
+   var sources=new WrapPanel();Children.Add(sources);
+   foreach(string id in SleepDiagnostic.SourceIds){string source=id;var check=new CheckBox{Content=SleepDiagnostic.SourceLabel(source),IsChecked=main.Config.SleepIgnoreSources.Contains(source),FontSize=12,Foreground=Design.B(Design.Ink),Margin=new Thickness(0,4,16,4),VerticalContentAlignment=VerticalAlignment.Center};System.Windows.Automation.AutomationProperties.SetAutomationId(check,"SleepIgnoreSource-"+source);sources.Children.Add(check);RoutedEventHandler change=delegate{if(check.IsChecked==true){if(!main.Config.SleepIgnoreSources.Contains(source))main.Config.SleepIgnoreSources.Add(source);}else main.Config.SleepIgnoreSources.Remove(source);main.Save();main.EvaluateSleep();};check.Checked+=change;check.Unchecked+=change;}
+   var sourceHint=Design.Text(UiText.T("勾选的来源不参与静息计时或唤醒，任务卡片仍会显示。","Selected sources do not affect idle timing or wake. Their cards remain visible."),11,Design.Muted);sourceHint.TextWrapping=TextWrapping.Wrap;sourceHint.TextTrimming=TextTrimming.None;sourceHint.Margin=new Thickness(0,5,0,14);Children.Add(sourceHint);
    var heading=Design.Text(UiText.T("按标题关键词忽略线程","Ignore conversations by title"),12);heading.Margin=new Thickness(0,0,0,5);Children.Add(heading);
    var row=new Grid();row.ColumnDefinitions.Add(new ColumnDefinition());row.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
    var input=new TextBox{Text=string.Join(", ",main.Config.SleepIgnoreKeywords),FontSize=12,MinHeight=30,Padding=new Thickness(6,4,6,4),Foreground=Design.B(Design.Ink),Background=Design.B(Design.Surface),BorderBrush=Design.B(Design.Line),VerticalContentAlignment=VerticalAlignment.Center};input.ToolTip=UiText.T("例如 hb, heartbeat；多个关键词用逗号分隔","For example hb, heartbeat. Separate keywords with commas.");System.Windows.Automation.AutomationProperties.SetName(input,UiText.T("静息忽略关键词","Idle ignore keywords"));row.Children.Add(input);
    var apply=Design.Button(UiText.T("应用","Apply"));apply.Margin=new Thickness(6,0,0,0);apply.Padding=new Thickness(8,2,8,2);Grid.SetColumn(apply,1);row.Children.Add(apply);Children.Add(row);
    var hint=Design.Text(UiText.T("标题包含任一关键词即忽略，不区分大小写；仅影响静息计时和唤醒。清空后应用可取消。","Title contains any keyword, ignoring case. Affects idle timing and wake only. Clear and apply to remove."),11,Design.Muted);hint.TextWrapping=TextWrapping.Wrap;hint.TextTrimming=TextTrimming.None;hint.Margin=new Thickness(0,5,0,0);Children.Add(hint);
    apply.Click+=delegate{main.Config.SleepIgnoreKeywords=SleepDiagnostic.ParseKeywords(input.Text);input.Text=string.Join(", ",main.Config.SleepIgnoreKeywords);main.Save();main.EvaluateSleep();};
+
   }
  }
 

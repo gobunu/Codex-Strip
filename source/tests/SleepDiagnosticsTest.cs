@@ -76,7 +76,7 @@ class SleepDiagnosticsTest {
  static async Task Settle(StripWindow w){await Task.Delay(380);w.UpdateLayout();}
  static void Bounds(FrameworkElement item,FrameworkElement outer,string label){var bounds=item.TransformToAncestor(outer).TransformBounds(new Rect(0,0,item.ActualWidth,item.ActualHeight));Check(item.ActualWidth>0&&item.ActualHeight>0&&bounds.Left>=-1&&bounds.Top>=-1&&bounds.Right<=outer.ActualWidth+1&&bounds.Bottom<=outer.ActualHeight+1,label+" clipped: "+bounds);}
  static async Task Visuals(StripWindow w,string output){
-  await Settle(w);w.Engine.Cards.Clear();w.Config.SleepAuto=true;w.Config.SleepIdleMinutes=3;w.Config.SleepIgnoreKeywords=new List<string>{"hb"};
+  await Settle(w);w.Engine.Cards.Clear();w.Config.SleepAuto=true;w.Config.SleepIdleMinutes=3;w.Config.SleepIgnoreKeywords=new List<string>{"hb"};w.Config.SleepIgnoreSources.Clear();
   var card=new Card{Id="example-running",Host="local",Title=UiText.T("模型评测与结果整理","Evaluate model and collect results"),Status="active"};w.Engine.Cards[card.Key]=card;
   var hidden=new Card{Id="example-hidden",Host="durable",Title=UiText.T("远端环境配置","Configure remote environment"),Status="approval",Stale=true};w.Engine.Cards[hidden.Key]=hidden;
   var hb=new Card{Id="example-hb",Host="local",Title="hb · monitor",Status="active"};w.Engine.Cards[hb.Key]=hb;
