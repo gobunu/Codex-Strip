@@ -58,7 +58,7 @@ namespace CodexStrip {
   }
   public void Save(){Directory.CreateDirectory(DataDir);var path=Path.Combine(DataDir,"settings.json");var tmp=path+".tmp";File.WriteAllText(tmp,J.Json(J.Obj("floatingRects",FloatingRects,"thicknesses",Thicknesses,"monitorScales",MonitorScales,"pendingCompletions",PendingCompletions,"theme",ThemeMode,"uiScale",DefaultUiScale,"count",Count,"topmost",Topmost,"topmostMode",TopmostMode,"reserveWorkArea",ReserveWorkArea,"dockEdge",DockEdge,"dockMonitor",DockMonitor,"dockHorizontalSize",DockHorizontalSize,"dockVerticalSize",DockVerticalSize,"host",Host,"width",Width,"height",Height,"left",Left,"top",Top,"clicks",Clicks,"watched",Watched,"sleepDebug",SleepDebug,"sleepIgnoreKeywords",SleepIgnoreKeywords.ToArray(),"sleepAuto",SleepAuto,"sleepRingCharts",SleepRingCharts,"sleepSmoothRings",SleepSmoothRings,"sleepGlassRefraction",SleepGlassRefraction,"sleepIdleMinutes",SleepIdleMinutes,"sleepWidgets",SleepWidgets.ToArray(),"sleepWallpaperPath",SavedWallpaperPath(),"sleepAdapterId",SleepAdapterId,"sleepSpeedUnit",SleepSpeedUnit,"sleepAccent",SleepAccent,"sleepDim",SleepDim)));if(File.Exists(path))File.Replace(tmp,path,null);else File.Move(tmp,path);}
  }
- public enum UnreadSource { Persisted, List, CachedSummary, Stream, Authoritative }
+ public enum UnreadSource { Persisted, List, CompletedList, CachedSummary, Stream, Authoritative }
  static class UnreadClock {
   static readonly object gate=new object();static double last;
   public static double Next(){lock(gate){last=Math.Max(J.Now,last+.000001);return last;}}
@@ -92,7 +92,7 @@ namespace CodexStrip {
    // A receipt belongs to the turn it acknowledged. It cannot acknowledge a later turn.
    if(turnId.Length>0&&TurnId.Length>0&&turnId!=TurnId)return;
    bool sameTurn=UnreadTurnId.Length==0||turnId.Length==0||UnreadTurnId==turnId;
-   bool confirmed=!unread&&(int)source>=(int)UnreadSource.CachedSummary&&status=="completed"&&turnId.Length>0;
+   bool confirmed=!unread&&(int)source>=(int)UnreadSource.CompletedList&&status=="completed"&&turnId.Length>0;
    if(UnreadKnown&&sameTurn){
     // Unversioned summaries cannot undo a viewed result. A later explicit
     // receipt can still mark that same result unread from the desktop menu.
@@ -202,13 +202,15 @@ namespace CodexStrip {
   public async Task Refresh(){if(Refreshing)return;Refreshing=true;
    // Work only on detached cards; readers keep the last complete snapshot.
    var Cards=this.Cards.ToDictionary(p=>p.Key,p=>p.Value.Copy());bool Connected=this.Connected;string Connection=this.Connection,Unavailable=this.Unavailable;
+   var completedAtStart=Cards.Values.Where(c=>c.Status=="completed"&&c.TurnId.Length>0).ToDictionary(c=>c.Key,c=>c.TurnId);
    try {
    // Desktop host enumeration can take 30 seconds before reporting an offline host.
-   double readObservedAt=UnreadClock.Next();object result=await Call("list_threads",J.Obj("limit",50),45000);var listedUnread=new Dictionary<string,bool>();
+   double readObservedAt=UnreadClock.Next();object result=await Call("list_threads",J.Obj("limit",50),45000);var listedUnread=new Dictionary<string,bool>();var listedEnded=new HashSet<string>();
    var unavailableHosts=new HashSet<string>(J.Arr(J.Get(result,"unavailableHosts")).Select(h=>J.Str(h,"hostId")).Where(h=>h.Length>0));
    var list=J.Arr(J.Get(result,"pinnedThreads")).Concat(J.Arr(J.Get(result,"threads"))).Where(t=>J.Str(t,"kind")=="codex").ToArray();
    var keys=new HashSet<string>();foreach(var t in list){string id=J.Str(t,"id"),host=J.Str(t,"hostId");if(host.Length==0)host="local";string key=host+"/"+id;if(!keys.Add(key))continue;Card c;if(!Cards.TryGetValue(key,out c)){c=new Card{Id=id,Host=host,Interaction=J.Num(t,"updatedAt")};Cards[key]=c;}c.Title=J.Str(t,"title");c.Status=J.Str(t,"status");if(J.Get(t,"isUnread") is bool)listedUnread[key]=(bool)J.Get(t,"isUnread");}
    foreach(var t in list){string host=J.Str(t,"hostId");if(host.Length==0)host="local";Cards[host+"/"+J.Str(t,"id")].NavigationMetadata(t);}
+   foreach(var t in list)if(new[]{"idle","notLoaded","completed"}.Contains(J.Str(t,"status"))){string host=J.Str(t,"hostId");listedEnded.Add((host.Length==0?"local":host)+"/"+J.Str(t,"id"));}
    // Explicitly tracked links remain discoverable even when the app list omits them.
    foreach(var watch in Settings.Watched){string key=watch.Value+"/"+watch.Key;if(keys.Contains(key))continue;Card c;if(!Cards.TryGetValue(key,out c))c=new Card{Id=watch.Key,Host=watch.Value,Title=UiText.T("正在读取线程","Loading conversation")};if(unavailableHosts.Contains(c.Host)){Cards[key]=c;keys.Add(key);c.Stale=true;continue;}try{var detail=await Call("read_thread",J.Obj("threadId",c.Id,"hostId",c.Host,"turnLimit",2,"includeOutputs",false,"maxOutputCharsPerItem",1200),15000);c.Title=J.Str(J.Get(detail,"thread"),"title");c.Detail(detail);Cards[key]=c;keys.Add(key);}catch{if(Cards.ContainsKey(key)){keys.Add(key);c.Stale=true;}}}
    Unavailable=J.Arr(J.Get(result,"unavailableHosts")).Length>0?"部分主机暂不可用":"";
@@ -229,7 +231,12 @@ namespace CodexStrip {
    foreach(var c in Card.Sort(Cards.Values,Settings).Where(c=>c.Host=="local"&&!c.Live)){var msg=await Task.Run(()=>localMessages.Read(c));if(msg.Length>0){c.Message=msg;c.MessageKind="最新对话";c.MessageUnavailable=false;c.QuestionPending=localMessages.Waiting(c);}}
    // Bind a successful list observation after polling has identified its current turn.
    foreach(var entry in listedUnread){Card c;if(!Cards.TryGetValue(entry.Key,out c))continue;Card observation;
-    if(!listedReadState.TryGetValue(entry.Key,out observation)||observation.TurnId!=c.TurnId||observation.Unread!=entry.Value){observation=new Card{Host=c.Host,Id=c.Id,TurnId=c.TurnId,Status=c.Status};observation.SetUnread(entry.Value,readObservedAt,UnreadSource.List,c.TurnId);listedReadState[entry.Key]=observation;}
+    bool known=listedReadState.TryGetValue(entry.Key,out observation);string completedTurn;
+    // A completed-turn read can arrive through polling when another computer
+    // viewed it and no local conversation stream owns the thread. Qualify the
+    // checkpoint against the completed turn known before this list request.
+    bool completedRead=known&&!entry.Value&&c.Status=="completed"&&listedEnded.Contains(entry.Key)&&completedAtStart.TryGetValue(entry.Key,out completedTurn)&&completedTurn==c.TurnId&&observation.TurnId==c.TurnId&&(observation.Unread||observation.UnreadStatus!="completed");
+    if(!known||observation.TurnId!=c.TurnId||observation.Unread!=entry.Value||completedRead){observation=new Card{Host=c.Host,Id=c.Id,TurnId=c.TurnId,Status=c.Status};observation.SetUnread(entry.Value,readObservedAt,completedRead?UnreadSource.CompletedList:UnreadSource.List,c.TurnId);listedReadState[entry.Key]=observation;}
     c.MergeUnread(observation);
    }
    LastRefresh=DateTime.Now;Connection="已连接 Codex";if(Unavailable.Length>0)Connection=Unavailable;
