@@ -1,12 +1,32 @@
 # Codex Strip 更新说明
 
-## 未发布
+## v0.1.3 · 2026-10-16
 
-- 提供中文和英文界面的独立便携包，构建与打包脚本支持语言参数。
-- 云端和 SSH 会话保留主机信息；临时子线程跳到关联的主线程。
-- 修正已查看结果的未读标记，并按轮次同步完成提醒。
-- 调整静息计时与页面切换，修正 GPU 占用采样。
-- 更新中英文 README 和使用说明。
+### 中文
+
+- 兼容新版 Codex 桌面连接接口，保留旧版接口支持；改善任务列表读取较慢或部分主机不可用时的重连行为。
+- 修复本机、云端、SSH 和 Remote Control 会话跳转；临时子线程在存在父线程关联时打开主线程。
+- 修复已查看结果被旧刷新数据重新标成未读的问题，改进跨设备已读确认和每轮完成提醒同步。
+- 新增可选静息 Debug、实时倒计时与阻塞线程详情；支持按标题关键词或会话来源忽略静息阻塞和唤醒，默认忽略云端（durable）来源，保留任务卡片和未读提醒。
+- 已结束的失败任务可进入静息；调整页面切换，修正 GPU 占用采样。
+- 提供中文、英文独立便携包及 SHA-256 校验文件，更新中英文使用说明。
+
+### English
+
+- Support the current Codex desktop connection interface while retaining compatibility with the previous interface. Improve reconnect behavior when task listing is slow or a host is unavailable.
+- Restore navigation for local, cloud, SSH, and Remote Control conversations. Temporary child threads open their main thread when a parent link is available.
+- Prevent stale refreshes from restoring unread indicators after a result has been viewed. Improve read confirmations across devices and completion tracking for each turn.
+- Add optional Idle Debug with a live countdown and blocker details. Exclude conversations from idle blocking and wake by title keyword or source. Cloud (durable) is excluded by default; task cards and unread indicators remain visible.
+- Allow ended failed tasks to become idle, refine view transitions, and correct GPU usage sampling.
+- Provide separate Chinese and English portable packages with SHA-256 checksums and updated guides.
+
+### 下载与更新 / Downloads and update
+
+- 中文：`CodexStrip-portable-zh-CN.zip`
+- English: `CodexStrip-portable-en.zip`
+- 校验文件 / Checksums: `SHA256SUMS.txt`
+
+更新前退出 Strip，替换程序文件并保留完整的 `data/` 文件夹。Exit Strip before updating, replace the application files, and keep the entire `data/` folder.
 
 ## v0.1.2
 

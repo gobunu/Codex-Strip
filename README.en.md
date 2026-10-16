@@ -32,10 +32,11 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 
 | Feature | Details |
 | :--- | :--- |
-| Tasks | Progress, requests for input, and unread results for local, cloud, and SSH tasks |
+| Tasks | Progress, requests for input, and unread results for local, cloud, SSH, and Remote Control tasks |
 | Navigation | Click to open a conversation; temporary child threads open their main thread when a parent link is available |
 | Usage limits | Remaining weekly usage and limit details |
 | Resource monitor | CPU, GPU, and memory usage, usage by major processes, and network and disk speed charts |
+| Idle rules | Exclude conversations from idle blocking and wake by title keyword or source; cloud (durable) is excluded by default. Optional countdown and blocker diagnostics |
 | Layout | Horizontal or vertical, docking to any screen edge, floating window, fullscreen, and system tray |
 | Display settings | 100%–200% scaling, with position and scale saved separately for each monitor |
 | Appearance | Light and dark themes, custom wallpapers, clear glass and edge refraction effects |
