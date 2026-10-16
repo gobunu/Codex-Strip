@@ -149,12 +149,17 @@ namespace CodexStrip {
    if(card==null||!Guid.TryParseExact(card.Id,"D",out id)||string.IsNullOrWhiteSpace(card.Host)||card.Host.Any(char.IsControl))throw new ArgumentException(UiText.T("线程链接信息不完整。","Incomplete conversation link."));
    return "codex://threads/"+id.ToString("D")+"?hostId="+Uri.EscapeDataString(card.Host);
   }
-  static void Launch(string link){using(var process=Process.Start(new ProcessStartInfo(link){UseShellExecute=true})){} }
+  public static ProcessStartInfo DesktopLaunchInfo(string link,string executable){
+   // Packaged desktop updates can leave Windows' codex:// registration stale.
+   // Route the URL through the executable owning the current desktop window.
+   return string.IsNullOrWhiteSpace(executable)?new ProcessStartInfo(link){UseShellExecute=true}:new ProcessStartInfo(executable,"\""+link+"\""){UseShellExecute=true,WindowStyle=ProcessWindowStyle.Hidden};
+  }
+  static void Launch(string link){using(var process=Process.Start(DesktopLaunchInfo(link,CodexForeground.ExecutablePath()))){} }
   public static async Task Open(Card card,Func<string,object,int,Task<object>> call,Action<string> launch=null){
    if(card==null)throw new ArgumentNullException("card");
-   // The desktop tool has no hostId argument. Its native links preserve the
-   // cloud/SSH host instead of trying to restore the thread on the local host.
-   if(UsesDesktopLink(card)){(launch??Launch)(DesktopLink(card));return;}
+   // Current desktops resolve hosted thread IDs through the native navigator.
+   // Older desktops need the host-qualified URL fallback.
+   if(UsesDesktopLink(card)){string link=DesktopLink(card);try{var result=await call("navigate_to_codex_page",J.Obj("threadId",card.Id),12000);if(!object.Equals(J.Get(result,"navigated"),false))return;}catch(IOException){}(launch??Launch)(link);return;}
    await call("navigate_to_codex_page",J.Obj("threadId",card.Id),12000);
   }
  }

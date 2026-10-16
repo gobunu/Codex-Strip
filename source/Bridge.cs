@@ -31,13 +31,18 @@ namespace CodexStrip {
    if(ContextId==null){try {string home=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);if(string.IsNullOrEmpty(home))home=Environment.GetEnvironmentVariable("USERPROFILE");string index=Path.Combine(home,".codex","session_index.jsonl");using(var stream=new FileStream(index,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)){if(stream.Length>262144){stream.Seek(-262144,SeekOrigin.End);}using(var reader=new StreamReader(stream)){foreach(string line in reader.ReadToEnd().Split('\n').Reverse()){try{string id=J.Str(J.Parse(line),"id");if(Guid.TryParse(id,out valid)){ContextId=id;break;}}catch{}}}}}catch{}}
   }
   int nextId;
+  public static string[] DiscoveryCandidates(IEnumerable<string> paths,string supplied=null){
+   const string prefix=@"\\.\pipe\";
+   Func<string,string> name=path=>{path=(path??"").Trim();return path.StartsWith(prefix,StringComparison.OrdinalIgnoreCase)?path.Substring(prefix.Length):path;};
+   var found=(paths??new string[0]).Select(name).Where(p=>p.StartsWith("codex-app-tools",StringComparison.OrdinalIgnoreCase)||p.StartsWith("codex-browser-use",StringComparison.OrdinalIgnoreCase)).OrderBy(p=>p.StartsWith("codex-app-tools",StringComparison.OrdinalIgnoreCase)?0:1);
+   return (string.IsNullOrWhiteSpace(supplied)?found:new[]{name(supplied)}.Concat(found)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+  }
   public async Task Discover() {
    var candidates=new List<string>();
    // Enumerate the existing desktop pipes. No SSH, daemon or remote server is started.
-   try { candidates.AddRange(Directory.GetFiles(@"\\.\pipe\").Where(p=>Path.GetFileName(p).StartsWith("codex-browser-use",StringComparison.OrdinalIgnoreCase))); } catch {}
-   string supplied=Environment.GetEnvironmentVariable("CODEX_APP_TOOLS_PIPE_PATH");if(!string.IsNullOrWhiteSpace(supplied))candidates.Insert(0,supplied);
-   foreach(string path in candidates.Distinct()) {
-    string name=path.Replace(@"\\.\pipe\","");
+   try { candidates.AddRange(Directory.GetFiles(@"\\.\pipe\")); } catch {}
+   // New desktop builds expose app tools separately from browser-use pipes.
+   foreach(string name in DiscoveryCandidates(candidates,Environment.GetEnvironmentVariable("CODEX_APP_TOOLS_PIPE_PATH"))) {
     try {var result=await Rpc(name,"tools/list",J.Obj("threadStartKind","all"),2500);var tools=J.Arr(J.Get(result,"tools"));
      if(tools.Any(t=>J.Str(t,"name")=="list_threads")&&tools.Any(t=>J.Str(t,"name")=="wait_threads")){PipeName=name;return;}
     }catch{}
