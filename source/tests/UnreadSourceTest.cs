@@ -101,17 +101,18 @@ class UnreadSourceTest {
   }
  }
 
- // Exercise the actual list_threads -> wait_threads -> read_thread refresh
+ // Exercise the actual list_threads -> selective read_thread refresh
  // path using deterministic tool responses, including successive list values.
  sealed class ToolFixture {
   public bool Unread;
   public string TurnId=FirstTurn,Status="completed";
+  readonly double updatedAt=J.Now;
   public Func<object,Task<object>> DelayList;
   object Thread(){return J.Obj("id",Id,"hostId",Host,"title","Fixture task","status",J.Obj("type",Status=="completed"?"idle":"active","activeFlags",new string[0]));}
   object Turn(){return J.Obj("id",TurnId,"status",Status=="active"?"inProgress":Status,"startedAt",TurnId==FirstTurn?100:200,"items",new[]{J.Obj("type","agentMessage","text","Fixture reply")});}
   public Task<object> Call(string tool,object args,int timeout){
    object result;
-   if(tool=="list_threads")result=J.Obj("pinnedThreads",new object[0],"threads",new[]{J.Obj("id",Id,"hostId",Host,"kind","codex","title","Fixture task","status",Status,"isUnread",Unread,"updatedAt",100)},"unavailableHosts",new object[0]);
+   if(tool=="list_threads")result=J.Obj("pinnedThreads",new object[0],"threads",new[]{J.Obj("id",Id,"hostId",Host,"kind","codex","title","Fixture task","status",Status,"isUnread",Unread,"updatedAt",updatedAt)},"unavailableHosts",new object[0]);
    else if(tool=="wait_threads")result=J.Obj("polls",new[]{J.Obj("thread",Thread(),"latestTurn",Turn())});
    else if(tool=="read_thread")result=J.Obj("thread",Thread(),"turns",new[]{Turn()});
    else throw new Exception("Unexpected tool request: "+tool);

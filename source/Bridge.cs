@@ -15,6 +15,8 @@ namespace CodexStrip {
   public static object Get(object o,string k) { var d=o as Dictionary<string,object>;object v;return d!=null&&d.TryGetValue(k,out v)?v:null; }
   public static string Str(object o,string k,string fallback="") { return Convert.ToString(Get(o,k))??fallback; }
   public static double Num(object o,string k) { double n;return double.TryParse(Str(o,k),out n)?n:0; }
+  // Desktop lists can mix Unix seconds and milliseconds.
+  public static double UnixSeconds(double value){if(double.IsNaN(value)||double.IsInfinity(value)||value<=0)return 0;if(value>=100000000000)value/=1000;return value<=Now+300?value:0;}
   public static object[] Arr(object o) { var a=o as object[];if(a!=null)return a;var l=o as ArrayList;return l==null?new object[0]:l.ToArray(); }
   public static string Json(object o) { return new JavaScriptSerializer{MaxJsonLength=16*1024*1024,RecursionLimit=160}.Serialize(o); }
   public static object Parse(string s) {return new JavaScriptSerializer{MaxJsonLength=16*1024*1024,RecursionLimit=160}.DeserializeObject(s);}

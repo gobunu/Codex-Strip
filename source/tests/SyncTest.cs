@@ -13,9 +13,9 @@ class SyncTest {
  var refresh=engine.Refresh();await reached.Task;
  if(engine.Cards[old.Key]!=old||old.Title!="old title"||old.Status!="completed"||commits!=0)throw new Exception("Partial data escaped while awaiting messages");
  gate.SetResult(J.Obj("thread",Thread(),"turns",new[]{J.Obj("id","turn","startedAt",20,"items",new[]{J.Obj("type","agentMessage","text","new message")})}));await refresh;
- if(commits!=1||engine.Cards[old.Key].Message!="new message"||engine.Cards[old.Key].Title!="new title"||old.Message!="old message")throw new Exception("Atomic commit failed");
- fail=true;await engine.Refresh();if(engine.Cards[old.Key].Message!="new message"||!engine.Cards[old.Key].Stale||commits!=2)throw new Exception("Failure did not preserve content");
- Console.WriteLine("PASS: old snapshot retained during slow reads; one complete commit; old objects unchanged; failure retains messages");
+ if(commits<1||engine.Cards[old.Key].Message!="new message"||engine.Cards[old.Key].Title!="new title"||old.Message!="old message")throw new Exception("Atomic card commit failed");
+ int beforeFailure=commits;fail=true;await engine.Refresh();if(engine.Cards[old.Key].Message!="new message"||!engine.Cards[old.Key].Stale||commits<=beforeFailure)throw new Exception("Failure did not preserve content");
+ Console.WriteLine("PASS: card snapshot retained during slow reads; complete card published; old objects unchanged; failure retains messages");
  }
  static int Main(){try{Run().GetAwaiter().GetResult();return 0;}catch(Exception e){Console.WriteLine(e);return 1;}}
 }

@@ -34,6 +34,7 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 | :--- | :--- |
 | Tasks | Progress, requests for input, and unread results for local, cloud, SSH, and Remote Control tasks |
 | Navigation | Click to open a conversation; temporary child threads open their main thread when a parent link is available |
+| Sync scope | Set the recent conversation count and activity window. Unchanged ended conversations pause detail reads and resume when they change. Known tasks keep updating when list discovery is slow |
 | Usage limits | Remaining weekly usage and limit details |
 | Resource monitor | CPU, GPU, and memory usage, usage by major processes, and network and disk speed charts |
 | Idle rules | Exclude conversations from idle blocking and wake by title keyword or source; cloud (durable) is excluded by default. Optional countdown and blocker diagnostics |

@@ -10,6 +10,18 @@ Extract the portable package and run `CodexStrip.exe`. Keep `CodexStrip.exe.conf
 
 Settings are saved in `data/settings.json` inside the app folder, and wallpaper copies are stored in `data/wallpapers/`. Keep the entire `data/` folder when updating the app.
 
+## Task synchronization
+
+Under **Settings → Display**, **Recent tasks** selects 10, 20, 30, or 50 recent conversations, plus pinned conversations. The default is 20. **Active window** selects the past 1 hour, 6 hours, 24 hours, 3 days, or any time; the default is 24 hours. These settings are separate from the number of cards displayed.
+
+Each cycle checks the list for changes to timestamps, status, and unread markers. Ended conversations stop detail reads after 30 seconds without changes and resume when they change. Older conversations outside the activity window are skipped rather than read to fill the count. Known running tasks, input or approval requests, and unread changes are still checked. Paused conversations retain their cards and read state. After restarting Strip, older tasks outside the recent list may not appear until the desktop stream discovers them.
+
+Up to four detail reads run at once, and completed reads update their cards immediately. A failed conversation retries later without blocking its peers. List discovery runs in the background with one request at a time and increasing retry delays after failures. Slow lists do not stop known tasks from updating or mark every card as pending sync. Visible ended conversations receive occasional checks while discovery is delayed.
+
+If a turn is too large or details are temporarily unavailable, Strip falls back to a compact snapshot for task status and the latest available reply, while retrying full details at intervals. Missing message text preserves the last content with an unavailable-message label. A card shows pending sync only when neither source can establish its status.
+
+`data/recent-thread-cache.json` stores recent conversation IDs, hosts, titles, status, and timestamps for startup discovery. It stores no message bodies and is never treated as a fresh read receipt. Desktop records with an explicit host can also help discover tasks; Strip no longer guesses across hosts. Some new tasks may still take longer to appear while the list API is unavailable. `data/sync-state.json` records request, retry, and card counts for troubleshooting, without conversation titles, IDs, or messages.
+
 ## Idle monitoring
 
 The resource view fades in when entering idle mode and fades out quickly when returning to the task board. If Windows interface animations are disabled, the view switches immediately.

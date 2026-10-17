@@ -84,7 +84,32 @@ namespace CodexStrip {
   public void ApplyReadState(IEnumerable<Card> cards){lock(gate){foreach(var card in cards)ApplyReadStateLocked(card);}}
   NamedPipeClientStream pipe;bool stopped,started;string client="";public bool Connected{get;private set;}public Action Changed=delegate{};
   public void Start(){if(started)return;started=true;Task.Run((Func<Task>)Run);}
-  public void DiscoverKnownThreads(){try{var path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex",".codex-global-state.json");object data;using(var f=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)){using(var r=new StreamReader(f))data=J.Parse(r.ReadToEnd());}var history=J.Get(J.Get(data,"electron-persisted-atom-state"),"prompt-history") as Dictionary<string,object>;if(history==null)return;var hosts=J.Arr(J.Get(data,"remote-projects")).Select(p=>J.Str(p,"hostId")).Where(h=>h.Length>0).Concat(new[]{"local"}).Distinct().ToArray();var assignments=J.Get(data,"thread-project-assignments");var candidates=new List<Card>();foreach(string id in history.Keys.OrderByDescending(x=>x,StringComparer.Ordinal).Take(64)){Guid valid;if(!Guid.TryParse(id,out valid))continue;string known=J.Str(J.Get(assignments,id),"hostId");foreach(string host in known.Length>0?new[]{known}:hosts)candidates.Add(new Card{Id=id,Host=host});}Watch(candidates);}catch{}}
+  public static Card[] KnownThreadCandidates(object data,int limit=64){
+   var found=new Dictionary<string,Card>();var atoms=J.Get(data,"electron-persisted-atom-state") as Dictionary<string,object>;
+   if(atoms==null)return new Card[0];
+   foreach(var entry in atoms.Where(p=>p.Key.StartsWith("remote-thread-summaries-v3:",StringComparison.Ordinal)))foreach(var item in J.Arr(entry.Value)){
+    string id=J.Str(item,"conversationId"),host=J.Str(item,"hostId");Guid valid;if(!Guid.TryParse(id,out valid)||host.Length==0)continue;
+    var card=new Card{Id=id,Host=host,Title=J.Str(item,"title"),Status=J.Str(J.Get(item,"threadRuntimeStatus"),"type"),Interaction=J.UnixSeconds(J.Num(item,"updatedAt")),Stale=true};found[card.Key]=card;
+   }
+   var history=J.Get(atoms,"prompt-history") as Dictionary<string,object>;var assignments=J.Get(data,"thread-project-assignments");var membership=J.Get(data,"thread-project-membership-host-ids");
+   var assigned=assignments as Dictionary<string,object>;var members=membership as Dictionary<string,object>;
+   var ids=(history==null?Enumerable.Empty<string>():history.Keys).Concat(assigned==null?Enumerable.Empty<string>():assigned.Keys).Concat(members==null?Enumerable.Empty<string>():members.Keys).Distinct();
+   foreach(string id in ids){
+    Guid valid;if(!Guid.TryParse(id,out valid))continue;var assignment=J.Get(assignments,id);string host=Convert.ToString(J.Get(membership,id));
+    if(string.IsNullOrEmpty(host))host=J.Str(assignment,"hostId");
+    string root=Convert.ToString(J.Get(J.Get(data,"thread-workspace-root-hints"),id));if(string.IsNullOrEmpty(root))root=Convert.ToString(J.Get(J.Get(data,"thread-projectless-output-directories"),id));
+    if(string.IsNullOrEmpty(host)&&(J.Str(assignment,"projectKind")=="local"||!string.IsNullOrEmpty(root)&&(root.StartsWith(@"\\",StringComparison.Ordinal)||root.Length>2&&char.IsLetter(root[0])&&root[1]==':')))host="local";
+    // Never guess that a thread exists on every connected host. That generated
+    // cross-host hydration requests and access-denied errors for unrelated tasks.
+    if(string.IsNullOrEmpty(host))continue;
+    string key=host+"/"+id;if(found.ContainsKey(key))continue;double created=0;long ms;
+    if(id.Length==36&&id[14]=='7'&&long.TryParse(id.Substring(0,8)+id.Substring(9,4),System.Globalization.NumberStyles.HexNumber,System.Globalization.CultureInfo.InvariantCulture,out ms))created=ms/1000.0;
+    found[key]=new Card{Id=id,Host=host,Title=UiText.T("正在读取线程","Loading conversation"),Interaction=created,Stale=true};
+   }
+   return found.Values.OrderByDescending(c=>c.Interaction).Take(limit).ToArray();
+  }
+  public static Card[] ReadKnownThreadCandidates(int limit=64){try{var path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex",".codex-global-state.json");using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var reader=new StreamReader(file))return KnownThreadCandidates(J.Parse(reader.ReadToEnd()),limit);}catch{return new Card[0];}}
+  public void DiscoverKnownThreads(){Watch(ReadKnownThreadCandidates());}
   public void Watch(IEnumerable<Card> cards){var added=new List<Card>();lock(gate){foreach(var c in cards){Card known;if(!wanted.TryGetValue(c.Key,out known)){wanted[c.Key]=c.Copy();added.Add(c.Copy());}else if(c.TurnId.Length>0&&(known.TurnId.Length==0||c.Started>=known.Started))wanted[c.Key]=c.Copy();}}if(Connected)foreach(var c in added){var t=Follow(c,true);}}
   public Card[] Latest(){lock(gate){return states.Values.Where(s=>s.Preview!=null).Select(s=>{var c=s.Preview.Copy();Card known;c.Stale=!Connected||s.Invalid||(wanted.TryGetValue(c.Key,out known)&&known.TurnId.Length>0&&known.TurnId!=c.TurnId&&known.Started>c.Started);if(!c.Stale)ApplyReadStateLocked(c);return c;}).ToArray();}}
   async Task Send(object msg){var data=Encoding.UTF8.GetBytes(J.Json(msg));await writeLock.WaitAsync();try{var p=pipe;if(p==null||!p.IsConnected)return;await p.WriteAsync(BitConverter.GetBytes(data.Length),0,4);await p.WriteAsync(data,0,data.Length);await p.FlushAsync();}finally{writeLock.Release();}}
