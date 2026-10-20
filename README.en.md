@@ -37,7 +37,7 @@ Shows CPU, GPU, and memory usage, plus network and disk speeds. When no tasks ar
 | Sync scope | Set the recent conversation count and activity window. Unchanged ended conversations pause detail reads and resume when they change. Known tasks keep updating when list discovery is slow |
 | Usage limits | Remaining weekly usage and limit details |
 | Resource monitor | CPU, GPU, and memory usage, usage by major processes, and network and disk speed charts |
-| Idle rules | Exclude conversations from idle blocking and wake by title keyword or source; cloud (durable) is excluded by default. Optional countdown and blocker diagnostics |
+| Ignore rules | Hide conversations and status alerts by title keyword or source, also excluding them from idle blocking and wake. Cloud (durable) is ignored by default. Optional countdown and blocker diagnostics |
 | Layout | Horizontal or vertical, docking to any screen edge, floating window, fullscreen, and system tray |
 | Display settings | 100%–200% scaling, with position and scale saved separately for each monitor |
 | Appearance | Light and dark themes, custom wallpapers, clear glass and edge refraction effects |

@@ -117,7 +117,10 @@ namespace CodexStrip {
   public string Key {get{return Host+"/"+Id;}}
   public string HostLabel {get{return Host=="local"?"LOCAL":Host.Replace("remote-ssh-discovered:","").ToUpperInvariant();}}
   public static double Rank(Card c,Settings s){double clicked;s.Clicks.TryGetValue(c.Key,out clicked);return Math.Max(J.UnixSeconds(c.Interaction),J.UnixSeconds(clicked));}
-  public static Card[] Sort(IEnumerable<Card> cards,Settings s){return cards.Where(c=>s.Host=="all"||c.Host==s.Host).OrderByDescending(c=>Rank(c,s)).ThenBy(c=>c.Key,StringComparer.Ordinal).Take(s.Count).ToArray();}
+  public bool AtCapacity {get{var error=(LastError??"").ToLowerInvariant();return error.Contains("capacity")||error.Contains("overloaded")||error.Contains("容量不足")||error.Contains("容量不够");}}
+  public int SortPriority {get{if(QuestionPending)return 1;if(Stale||AtCapacity)return 4;if(UnreadResult)return 0;if(Status=="input")return 1;if(Status=="approval")return 2;return Status=="active"?3:4;}}
+  public bool Ignored(Settings settings){return SleepDiagnostic.IgnoredBy(this,settings.SleepIgnoreKeywords,settings.SleepIgnoreSources).Length>0;}
+  public static Card[] Sort(IEnumerable<Card> cards,Settings s){return cards.Where(c=>!c.Ignored(s)&&(s.Host=="all"||c.Host==s.Host)).OrderBy(c=>c.SortPriority).ThenByDescending(c=>Rank(c,s)).ThenBy(c=>c.Key,StringComparer.Ordinal).Take(s.Count).ToArray();}
   public void Snapshot(object poll){
    if(J.Get(poll,"thread")==null)return;
    NavigationMetadata(J.Get(poll,"thread"));
