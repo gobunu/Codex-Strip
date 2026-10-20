@@ -163,9 +163,9 @@ namespace CodexStrip {
   static void Launch(string link){using(var process=Process.Start(DesktopLaunchInfo(link,CodexForeground.ExecutablePath()))){} }
   public static async Task Open(Card card,Func<string,object,int,Task<object>> call,Action<string> launch=null){
    if(card==null)throw new ArgumentNullException("card");
-   // Current desktops resolve hosted thread IDs through the native navigator.
-   // Older desktops need the host-qualified URL fallback.
-   if(UsesDesktopLink(card)){string link=DesktopLink(card);try{var result=await call("navigate_to_codex_page",J.Obj("threadId",card.Id),12000);if(!object.Equals(J.Get(result,"navigated"),false))return;}catch(IOException){}(launch??Launch)(link);return;}
+   // The native tool cannot accept hostId and waits for cross-host discovery.
+   // Use the known host directly; a timed-out tool can still navigate later.
+   if(UsesDesktopLink(card)){(launch??Launch)(DesktopLink(card));return;}
    await call("navigate_to_codex_page",J.Obj("threadId",card.Id),12000);
   }
  }

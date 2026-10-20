@@ -26,10 +26,10 @@ class ThreadNavigationTest {
    bool rejected=false;try{ThreadNavigation.Resolve(broken,new[]{broken});}catch(System.IO.IOException){rejected=true;}
    Require(rejected,"orphan or cycle attempted restore");
   }
-  int calls=0,launches=0;string link=null;bool nativeHosted=false;
+  int calls=0,launches=0;string link=null;
   Func<string,object,int,Task<object>> call=(tool,args,timeout)=>{
    calls++;Require(tool=="navigate_to_codex_page"&&J.Str(args,"threadId")==id,"local navigation request changed");
-   return Task.FromResult<object>(J.Obj("navigated",nativeHosted));
+   return Task.FromResult<object>(J.Obj("navigated",true));
   };
   Action<string> launch=value=>{launches++;link=value;};
   var redirected=ThreadNavigation.Resolve(child,new[]{main,child});
@@ -44,11 +44,14 @@ class ThreadNavigationTest {
    Require(uri.Scheme=="codex"&&uri.Host=="threads"&&uri.AbsolutePath=="/"+id,"wrong native navigation route");
    Require(query.Count==1&&query["hostId"]==host&&uri.Fragment.Length==0,"host lost or changed URL structure");
   }
-  Require(calls==5&&launches==4,"legacy hosted navigation lost its host-qualified fallback");
-  nativeHosted=true;ThreadNavigation.Open(new Card{Host="durable",Id=id},call,launch).GetAwaiter().GetResult();
-  Require(calls==6&&launches==4,"current hosted navigator launched a legacy URL despite native acknowledgement");
-  nativeHosted=false;ThreadNavigation.Open(new Card{Host="durable",Id=id},(tool,args,timeout)=>{throw new System.IO.IOException("old desktop cannot find hosted thread");},launch).GetAwaiter().GetResult();
-  Require(launches==5,"older desktop tool failure did not preserve hosted fallback");
+  Require(calls==1&&launches==4,"hosted navigation performed cross-host discovery");
+  var stalled=new TaskCompletionSource<object>();
+  var opening=ThreadNavigation.Open(new Card{Host="durable",Id=id},(tool,args,timeout)=>{calls++;return stalled.Task;},launch);
+  Require(opening.IsCompleted,"hosted navigation waited for a stalled native navigator");
+  opening.GetAwaiter().GetResult();
+  Require(calls==1&&launches==5,"hosted navigation left a native request that could switch pages later");
+  ThreadNavigation.Open(new Card{Host="remote-control:env_example",Id=id},(tool,args,timeout)=>{throw new System.IO.IOException("disconnected app tools");},launch).GetAwaiter().GetResult();
+  Require(launches==6,"known-host navigation depends on app-tools availability");
   string currentExecutable=@"C:\Program Files\WindowsApps\CurrentDesktop\ChatGPT.exe";
   var direct=ThreadNavigation.DesktopLaunchInfo(link,currentExecutable);
   Require(direct.FileName==currentExecutable&&direct.Arguments=="\""+link+"\""&&direct.UseShellExecute,"hosted navigation did not use the running desktop executable with one quoted URL");
@@ -59,11 +62,11 @@ class ThreadNavigationTest {
    bool rejected=false;try{ThreadNavigation.Open(bad,call,launch).GetAwaiter().GetResult();}catch(ArgumentException){rejected=true;}
    Require(rejected,"invalid link was launched");
   }
-  Require(calls==6&&launches==5,"invalid metadata triggered navigation");
+  Require(calls==1&&launches==6,"invalid metadata triggered navigation");
   bool failed=false;try{ThreadNavigation.Open(new Card{Host="durable",Id=id},call,value=>{throw new InvalidOperationException("launch failed");}).GetAwaiter().GetResult();}catch(InvalidOperationException){failed=true;}
-  Require(failed&&calls==7,"failed hosted launch was hidden");
+  Require(failed&&calls==1,"failed hosted launch was hidden or sent an unscoped navigation");
   failed=false;try{ThreadNavigation.Open(new Card{Host="local",Id=id},(tool,args,timeout)=>{throw new InvalidOperationException("tool failed");},launch).GetAwaiter().GetResult();}catch(InvalidOperationException){failed=true;}
-  Require(failed&&launches==5,"failed local navigation was hidden");
-  Console.WriteLine("PASS: local desktop tool; cloud and SSH host routing; URL encoding; invalid metadata; launch/tool failures");return 0;
+  Require(failed&&launches==6,"failed local navigation was hidden");
+  Console.WriteLine("PASS: local desktop tool; immediate cloud/SSH/remote-control routing despite stalled discovery; URL encoding; invalid metadata; launch/tool failures");return 0;
  }catch(Exception error){Console.Error.WriteLine(error);return 1;}}
 }

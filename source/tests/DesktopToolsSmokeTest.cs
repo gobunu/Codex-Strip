@@ -32,8 +32,9 @@ class DesktopToolsSmokeTest {
     bool nativeAcknowledged=false;
     var engine=new MonitorEngine(settings,async (tool,arguments,timeout)=>{var result=await bridge.Call(tool,arguments,timeout);if(tool=="navigate_to_codex_page")nativeAcknowledged=object.Equals(J.Get(result,"navigated"),true);return result;});engine.Cards[card.Key]=card;
     engine.Open(card).GetAwaiter().GetResult();
-    if(!nativeAcknowledged)throw new Exception("Current desktop did not acknowledge native navigation");
-    Console.WriteLine("NativeNavigationAcknowledged=true; Host="+card.Host);
+    if(!ThreadNavigation.UsesDesktopLink(card)&&!nativeAcknowledged)throw new Exception("Current desktop did not acknowledge local navigation");
+    if(ThreadNavigation.UsesDesktopLink(card)&&nativeAcknowledged)throw new Exception("Hosted navigation used cross-host discovery");
+    Console.WriteLine("NativeNavigationAcknowledged="+nativeAcknowledged+"; Host="+card.Host);
     if(!settings.Clicks.ContainsKey(card.Key))throw new Exception("Navigation did not record the click");
     if(ThreadNavigation.UsesDesktopLink(card)){
      if(!settings.PendingCompletions.ContainsKey(card.Key)||!card.CompletionPending)throw new Exception("Hosted shell launch prematurely acknowledged completion");
