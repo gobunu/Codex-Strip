@@ -19,6 +19,8 @@ namespace CodexStrip {
   Dictionary<string,Card> desktopSummaries=new Dictionary<string,Card>();
   Dictionary<string,object> readScopes=new Dictionary<string,object>();
   string readIdentity="";
+  public DesktopStream(){DesktopStateSnapshot.Shared.Updated+=SnapshotUpdated;}
+  void SnapshotUpdated(){if(!stopped)RefreshReadState();}
   public static Dictionary<string,HashSet<string>> ParseDesktopUnread(object data,string identity){
    var result=new Dictionary<string,HashSet<string>>();var saved=J.Get(data,"electron-thread-read-state-v1");if(J.Num(saved,"version")!=1)return result;
    var identities=J.Get(saved,"unreadByIdentity") as Dictionary<string,object>;if(identities==null)return result;
@@ -26,7 +28,7 @@ namespace CodexStrip {
    var hosts=selected as Dictionary<string,object>;if(hosts==null)return result;
    foreach(var group in hosts.GroupBy(p=>p.Key.Substring(0,Math.Max(0,p.Key.LastIndexOf(':'))))){if(group.Key.Length==0||group.Count()!=1)continue;result[group.Key]=new HashSet<string>(J.Arr(group.First().Value).Select(Convert.ToString));}return result;
   }
-  public void RefreshReadState(){try{var path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex",".codex-global-state.json");object data;using(var f=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)){using(var r=new StreamReader(f))data=J.Parse(r.ReadToEnd());}ObserveDesktopReadState(data);}catch{}}
+  public void RefreshReadState(){try{var cache=DesktopStateSnapshot.Shared;cache.RequestRefresh();object data;if(cache.TryGetSnapshot(out data))ObserveDesktopReadState(data);}catch{}}
   // Global file writes include unrelated settings. They are not read-state revisions.
   public void ObserveDesktopReadState(object data){bool changed;lock(gate){
    var saved=J.Get(data,"electron-thread-read-state-v1");var identities=J.Num(saved,"version")==1?J.Get(saved,"unreadByIdentity") as Dictionary<string,object>:null;
@@ -108,7 +110,7 @@ namespace CodexStrip {
    }
    return found.Values.OrderByDescending(c=>c.Interaction).Take(limit).ToArray();
   }
-  public static Card[] ReadKnownThreadCandidates(int limit=64){try{var path=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex",".codex-global-state.json");using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))using(var reader=new StreamReader(file))return KnownThreadCandidates(J.Parse(reader.ReadToEnd()),limit);}catch{return new Card[0];}}
+  public static Card[] ReadKnownThreadCandidates(int limit=64){try{var cache=DesktopStateSnapshot.Shared;cache.RequestRefresh();object data;return cache.TryGetSnapshot(out data)?KnownThreadCandidates(data,limit):new Card[0];}catch{return new Card[0];}}
   public void DiscoverKnownThreads(){Watch(ReadKnownThreadCandidates());}
   public void Watch(IEnumerable<Card> cards){var added=new List<Card>();lock(gate){foreach(var c in cards){Card known;if(!wanted.TryGetValue(c.Key,out known)){wanted[c.Key]=c.Copy();added.Add(c.Copy());}else if(c.TurnId.Length>0&&(known.TurnId.Length==0||c.Started>=known.Started))wanted[c.Key]=c.Copy();}}if(Connected)foreach(var c in added){var t=Follow(c,true);}}
   public Card[] Latest(){lock(gate){return states.Values.Where(s=>s.Preview!=null).Select(s=>{var c=s.Preview.Copy();Card known;c.Stale=!Connected||s.Invalid||(wanted.TryGetValue(c.Key,out known)&&known.TurnId.Length>0&&known.TurnId!=c.TurnId&&known.Started>c.Started);if(!c.Stale)ApplyReadStateLocked(c);return c;}).ToArray();}}
@@ -128,7 +130,7 @@ namespace CodexStrip {
    if(resync){await Follow(target,false);await Follow(target,true);}else if(changed)Changed();
   }
   static async Task<byte[]> Read(Stream s,int length){var b=new byte[length];int n=0;while(n<length){int r=await s.ReadAsync(b,n,length-n);if(r==0)throw new EndOfStreamException();n+=r;}return b;}
-  public void Dispose(){stopped=true;Connected=false;try{if(pipe!=null)pipe.Dispose();}catch{}}
+  public void Dispose(){stopped=true;Connected=false;DesktopStateSnapshot.Shared.Updated-=SnapshotUpdated;try{if(pipe!=null)pipe.Dispose();}catch{}}
  }
 
  public sealed class StreamState {

@@ -55,6 +55,7 @@ namespace CodexStrip {
    try{
     double now=refreshClock();var shown=Card.Sort(Cards.Values,Settings);
     var state=J.Obj("version",1,"observedUtc",DateTime.UtcNow.ToString("o"),"connected",Connected,"connection",Connection,"knownThreads",Cards.Count,"shownThreads",shown.Length,"shownStale",shown.Count(c=>c.Stale),"listInFlight",pendingList!=null&&!pendingList.Task.IsCompleted,"listPendingSeconds",pendingList==null?0:Math.Max(0,now-pendingList.StartedAt),"listFailures",listFailures,"listRetrySeconds",Math.Max(0,nextListAttempt-now));
+    var backup=DesktopStateSnapshot.Shared.GetDiagnostics();state["desktopStateBackup"]=J.Obj("status",backup.Status,"failures",backup.ConsecutiveFailures,"helperPid",backup.HelperPid,"attempts",backup.Attempts,"successes",backup.Successes,"timeouts",backup.Timeouts,"inFlight",backup.InFlight,"retrySeconds",backup.RetrySeconds,"lastSuccessUnix",backup.LastSuccessUnix);
     Directory.CreateDirectory(Settings.DataDir);File.WriteAllText(Path.Combine(Settings.DataDir,"sync-state.json"),J.Json(state));
    }catch{}
   }
