@@ -67,8 +67,26 @@ class CrossDeviceReadTest {
    Require(Current(engine).UnreadResult,"older list response cleared a newer manual unread");
   }
  }
+ static void FirstCompletedListAfterActiveRead(){
+  foreach(var source in new[]{UnreadSource.CachedSummary,UnreadSource.Stream,UnreadSource.Authoritative}){
+  var fixture=new Fixture{ListStatus="idle",TurnStatus="completed"};
+  var engine=new MonitorEngine(new Settings(),fixture.Call);
+  // Discovery or the live stream can publish a running, viewed turn before
+  // that task first appears in list_threads. Its result still needs review.
+  var running=new Card{Host=Host,Id=Id,TurnId=First,Status="active",Started=100};
+  running.SetUnread(false,1,source,First);engine.Cards[running.Key]=running;
+  Refresh(engine);Require(Current(engine).CompletionPending,"the first completed list prematurely acknowledged a newly observed result");
+  // A later completed-stage list can acknowledge this same result even if
+  // the first list checkpoint already said false/completed at lower priority.
+  Refresh(engine);Read(Current(engine));
+  for(int i=0;i<3;i++){Refresh(engine);Read(Current(engine));}
+  fixture.Turn=Next;fixture.Unread=true;Refresh(engine);
+  Require(Current(engine).TurnId==Next&&Current(engine).UnreadResult,"the previous read acknowledgement hid a new completed result");
+  }
+ }
  static int Main(){string data=Settings.DataDir;try{
   Settings.DataDir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"cross-device-test-data-"+Guid.NewGuid().ToString("N"));
+  FirstCompletedListAfterActiveRead();Console.WriteLine("PASS: repeated completed list clears an active read checkpoint even when first discovered after completion");
   CompletedReadWithoutStream();Console.WriteLine("PASS: completed-stage list read clears active-stage fallback without a local stream");
   FreshListChangeOverridesStaleStream();Console.WriteLine("PASS: changed listed read clears stale stream; manual unread and new turns remain visible");
   InFlightReadCannotUndoNewerManualUnread();Console.WriteLine("PASS: in-flight listed read cannot undo a newer manual unread");

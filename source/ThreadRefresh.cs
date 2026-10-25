@@ -86,7 +86,10 @@ namespace CodexStrip {
     Action<Card> applyRead=card=>{
      bool unread;if(!listedUnread.TryGetValue(card.Key,out unread))return;
      Card observation;bool known=listedReadState.TryGetValue(card.Key,out observation);string completedTurn;
-     bool completedRead=known&&!unread&&card.Status=="completed"&&listedEnded.Contains(card.Key)&&completedAtStart.TryGetValue(card.Key,out completedTurn)&&completedTurn==card.TurnId&&observation.TurnId==card.TurnId&&(observation.Unread||observation.UnreadStatus!="completed");
+     // A first completed list may lose to a stronger active-stage read cache.
+     // Promote a later ended list even when its own false value did not change.
+     bool activeReadCheckpoint=!card.Unread&&card.UnreadStatus!="completed";
+     bool completedRead=known&&!unread&&card.Status=="completed"&&listedEnded.Contains(card.Key)&&completedAtStart.TryGetValue(card.Key,out completedTurn)&&completedTurn==card.TurnId&&observation.TurnId==card.TurnId&&(observation.Unread||observation.UnreadStatus!="completed"||activeReadCheckpoint);
      if(!known||observation.TurnId!=card.TurnId||observation.Unread!=unread||completedRead){observation=new Card{Host=card.Host,Id=card.Id,TurnId=card.TurnId,Status=card.Status};observation.SetUnread(unread,observedAt,completedRead?UnreadSource.CompletedList:UnreadSource.List,card.TurnId);listedReadState[card.Key]=observation;}
      card.MergeUnread(observation);
     };

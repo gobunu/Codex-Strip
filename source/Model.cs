@@ -104,6 +104,8 @@ namespace CodexStrip {
     // Unversioned summaries cannot undo a viewed result. A later explicit
     // receipt can still mark that same result unread from the desktop menu.
     if(unread&&ReadConfirmed&&(source!=UnreadSource.Authoritative||observedAt<=ReadConfirmedAt))return;
+    // An old running-stage false cannot downgrade a completed read confirmation.
+    if(!unread&&ReadConfirmed&&!confirmed)return;
     // Replaying the cached false that preceded a manual unread receipt is stale.
     if(!unread&&Unread&&ReadSource==UnreadSource.Authoritative&&source!=UnreadSource.Authoritative&&observedAt<=UnreadUpdated)return;
     if(confirmed&&ReadConfirmed&&observedAt<=ReadConfirmedAt)return;
