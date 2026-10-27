@@ -1,20 +1,34 @@
 # Codex Strip 更新说明
 
-## 未发布
+## v0.1.4 · 2026-10-27
 
-- 对话详情因单轮内容过大或临时读取失败时，回退到紧凑状态接口更新状态和最新可用回复；完整详情按间隔重试，两个来源都不可读时才标记等待同步。
-- 卡片按“完成未查看 → 等待回答 → 需要批准 → 进行中 → 其余状态”分组，每组按最近交互时间倒序。错误、容量不足、重连、待同步、已完成、已中断、空闲和未加载共用最后一组，不固定置顶。
-- 统一会话更新时间的秒与毫秒单位，修复部分历史置顶会话的时间被放大、长期占据卡片首位的问题。
-- 修复已查看结果仍显示“完成 · 待确认”的问题：完成阶段的已读确认可清除运行阶段遗留的提醒，旧缓存不会重新恢复提示；保留新回复和手动标记未读的提醒。
-- 桌面状态改为读取 Codex 自带备份，并通过隐藏辅助进程在写入前主动让路；超时自动回收进程，连续失败后退避重试并保留最近一次有效缓存。未读同步、线程发现、导航和显示设置保持原有行为。
-- 忽略规则统一隐藏匹配线程及其完成、未读、待同步等提示；关键词和来源设置立即生效，隐藏线程不占卡片名额，取消忽略后可恢复显示。
-- 云端、SSH 和 Remote Control 会话直接按已知主机打开，避免跨主机查询拖慢点击跳转；完成提醒仍等待桌面已读确认。
-- 列表发现改为后台独立查询，限制为一个请求并在失败后退避重试；列表超时不再阻塞已知任务更新，也不再将全部卡片标为等待同步。
-- 缓存最近列表的基础信息用于启动发现；只使用主机归属明确的桌面记录，停止将未知线程拿到多个主机上猜测订阅。
-- 同步范围可配置：默认最近 20 个会话、近 24 小时，另外保留置顶会话；旧的已结束会话不再为凑满数量而读取详情。
-- 连续 30 秒无变化的已结束会话移出详情读取队列；更新时间、状态或未读标记变化后自动恢复，运行中与等待处理的任务继续检查。
-- 以最多 4 个并发详情请求替代全量快照和补读，已完成的卡片先更新，单个会话失败后退避重试。
-- 修复可读取但没有轮次记录的会话一直显示等待同步的问题。
+### 中文
+
+- 新增同步范围设置，默认检查最近 20 个会话、近 24 小时，另含置顶会话。已结束的会话连续 30 秒无变化后暂停读取详情，发生变化时自动恢复；详情请求最多并发 4 个，单个会话失败后独立重试。
+- 列表查询较慢或超时时，已知任务继续更新；缓存最近任务用于启动发现，并避免向不相关主机查询线程。
+- 对话详情过大或暂时不可读时，回退到紧凑状态接口，继续更新任务状态和最新可用回复；修复空会话持续显示等待同步的问题。
+- 加快云端、SSH 和 Remote Control 会话跳转，直接按已知主机打开对应会话。
+- 改进完成提醒和跨设备已读确认，修复已查看结果仍显示待确认、旧缓存重新恢复提醒的问题；保留新回复和手动标记未读的提醒。
+- 忽略规则立即隐藏匹配线程及其状态提示，隐藏线程不占卡片名额。卡片依次优先显示完成未查看、等待回答、需要批准和进行中的任务；各组按最近交互时间排序，并修复秒与毫秒混用导致的排序异常。
+- 改进桌面状态读取，减少状态文件占用冲突；读取超时后自动回收辅助进程，失败时保留最近一次有效状态并稍后重试。
+
+### English
+
+- Add synchronization scope settings, defaulting to 20 recent conversations within 24 hours, plus pinned conversations. Ended conversations pause detail reads after 30 seconds without changes and resume when they change. Up to four detail reads run concurrently, with independent retries for failed conversations.
+- Keep known tasks updating when list discovery is slow or times out. Cache recent tasks for startup discovery and avoid querying unrelated hosts for a conversation.
+- Fall back to compact snapshots when conversation details are too large or temporarily unavailable, preserving task status and the latest available reply. Fix empty conversations remaining pending sync.
+- Speed up navigation for cloud, SSH, and Remote Control conversations by opening them directly on their known host.
+- Improve completion reminders and read confirmations across devices. Prevent viewed results from remaining pending review or regaining reminders from stale caches, while preserving reminders for new replies and manually unread results.
+- Hide ignored conversations and their status alerts immediately without consuming card slots. Prioritize unread completed results, input requests, approval requests, and running tasks; sort each group by recent interaction and handle mixed timestamp units correctly.
+- Reduce desktop state-file contention. Recover timed-out reader processes, retain the last valid state after failures, and retry later.
+
+### 下载与更新 / Downloads and update
+
+- 中文：`CodexStrip-portable-zh-CN.zip`
+- English: `CodexStrip-portable-en.zip`
+- 校验文件 / Checksums: `SHA256SUMS.txt`
+
+更新前退出 Strip，替换程序文件并保留完整的 `data/` 文件夹。Exit Strip before updating, replace the application files, and keep the entire `data/` folder.
 
 ## v0.1.3 · 2026-10-16
 
